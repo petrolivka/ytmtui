@@ -1,15 +1,12 @@
 # Publishing checklist
 
-What still needs a human decision before this repository goes public. Nothing
-here is a code change; it is all things only the owner can settle.
-
-The repository is `https://github.com/petrolivka/ytmtui`, already set as
-`origin`, and every URL in the tree points at it.
+The repository is public at `https://github.com/petrolivka/ytmtui`. Every
+question that needed an owner's decision has been answered; this records what
+was decided and why, so none of it gets re-litigated, and what remains before a
+first release.
 
 ## Decided
 
-- **Repository**: `github.com/petrolivka/ytmtui`, set as `origin`, referenced
-  everywhere in the tree.
 - **Private vulnerability reporting**: enabled, so the advisory link in
   `SECURITY.md` and the issue template resolves.
 - **Licence: GPL-3.0-or-later.** Nothing forced it — all 336 transitive
