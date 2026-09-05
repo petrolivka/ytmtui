@@ -200,9 +200,16 @@ fn parse_tracks(v: &Value) -> Vec<Track> {
         // Column 1 is typically "Artist • Album • 3:33".
         let sub = col_text(1).map(json::runs).unwrap_or_default();
         let parts: Vec<&String> = sub.iter().filter(|s| s.trim() != "\u{2022}" && !s.trim().is_empty()).collect();
+
+        // Search puts the duration in the last run of column 1; library and
+        // playlist responses put it in `fixedColumns` instead. Try both, then
+        // fall back to scanning the item, so a shape change costs metadata
+        // rather than the whole row.
         let duration = parts
             .last()
             .and_then(|s| json::parse_duration(s))
+            .or_else(|| it.get("fixedColumns").and_then(json::find_duration))
+            .or_else(|| json::find_duration(it))
             .map(Duration::from_secs);
         let artist = parts.first().map(|s| s.trim().to_string()).unwrap_or_default();
         let album = if parts.len() >= 3 {

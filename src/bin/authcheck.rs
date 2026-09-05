@@ -10,6 +10,17 @@
 use anyhow::Result;
 use ytm_core::{Rating, VideoId};
 
+/// Accept a bare id or any YouTube / YouTube Music URL.
+fn extract_video_id(s: &str) -> String {
+    if let Some(rest) = s.split("v=").nth(1) {
+        return rest.chars().take(11).collect();
+    }
+    if let Some(rest) = s.split("youtu.be/").nth(1) {
+        return rest.chars().take(11).collect();
+    }
+    s.trim().to_string()
+}
+
 fn main() -> Result<()> {
     let yt = ytm_api::load_backend()?;
     if !yt.is_authenticated() {
@@ -34,8 +45,12 @@ fn main() -> Result<()> {
 
     let liked = yt.liked_songs()?;
     println!("  liked songs  : {} returned on the first page", liked.len());
-    for t in liked.iter().take(5) {
-        println!("     {} - {} [{}]", t.title, t.artist, t.duration_str());
+    for t in liked.iter().take(8) {
+        println!("     {:11}  {:>7}  {} - {}", t.id, t.duration_str(), t.title, t.artist);
+    }
+    let missing = liked.iter().filter(|t| t.duration.is_none()).count();
+    if missing > 0 {
+        println!("  note: {missing}/{} rows had no parseable duration", liked.len());
     }
     if liked.is_empty() {
         println!("  (empty first page - if you do have liked songs, the parser needs a look)");
@@ -50,9 +65,9 @@ fn main() -> Result<()> {
         eprintln!("--like needs a videoId, e.g. --like dQw4w9WgXcQ");
         std::process::exit(2);
     };
-    let id = VideoId(raw.clone());
+    let id = VideoId(extract_video_id(raw));
     if !id.is_valid() {
-        eprintln!("'{raw}' is not an 11-character video id");
+        eprintln!("could not read a video id from '{raw}' - pass an 11-character id or a YouTube/YouTube Music URL");
         std::process::exit(2);
     }
 

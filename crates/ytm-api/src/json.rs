@@ -70,6 +70,32 @@ pub fn runs(v: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Find the first text node anywhere under `v` that parses as a duration.
+/// Different surfaces put it in different places (search uses `flexColumns`,
+/// library and playlist responses use `fixedColumns`), so this is the
+/// last-resort fallback after the known shapes have been tried.
+pub fn find_duration(v: &Value) -> Option<u64> {
+    match v {
+        Value::Object(m) => {
+            if let Some(s) = m.get("simpleText").and_then(|x| x.as_str()) {
+                if let Some(d) = parse_duration(s) {
+                    return Some(d);
+                }
+            }
+            if let Some(runs) = m.get("runs").and_then(|x| x.as_array()) {
+                for r in runs {
+                    if let Some(d) = r.get("text").and_then(|t| t.as_str()).and_then(parse_duration) {
+                        return Some(d);
+                    }
+                }
+            }
+            m.values().find_map(find_duration)
+        }
+        Value::Array(a) => a.iter().find_map(find_duration),
+        _ => None,
+    }
+}
+
 /// Parse "3:33" or "1:02:03" into seconds.
 pub fn parse_duration(s: &str) -> Option<u64> {
     let s = s.trim();
@@ -77,12 +103,44 @@ pub fn parse_duration(s: &str) -> Option<u64> {
         return None;
     }
     let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() > 3 {
+    if !(2..=3).contains(&parts.len()) {
         return None;
     }
     let mut total = 0u64;
-    for p in &parts {
-        total = total * 60 + p.trim().parse::<u64>().ok()?;
+    for (i, p) in parts.iter().enumerate() {
+        let p = p.trim();
+        // Reject things that merely contain a colon, e.g. "1:1 mix" or a time
+        // of day: every field is numeric, and only the first may be one digit.
+        if p.is_empty() || !p.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        if i > 0 && p.len() != 2 {
+            return None;
+        }
+        total = total * 60 + p.parse::<u64>().ok()?;
+    }
+    // A track longer than 12 hours is a parse error, not a track.
+    if total == 0 || total > 12 * 3600 {
+        return None;
     }
     Some(total)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_duration;
+
+    #[test]
+    fn parses_real_durations() {
+        assert_eq!(parse_duration("3:33"), Some(213));
+        assert_eq!(parse_duration("0:58"), Some(58));
+        assert_eq!(parse_duration("1:02:03"), Some(3723));
+    }
+
+    #[test]
+    fn rejects_things_that_merely_contain_a_colon() {
+        for s in ["", "Aphex Twin", "1:1 mix", "Vol: 2", "12:3", "a:bc", "0:00", "99:99:99:99"] {
+            assert_eq!(parse_duration(s), None, "should reject {s:?}");
+        }
+    }
 }
