@@ -71,6 +71,31 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Set a rating explicitly. Exists because an automated UI test once typed
+    // a bare 'd' into a signed-in instance and left a thumbs-down behind.
+    if let Some(i) = args.iter().position(|a| a == "--rate") {
+        let id = VideoId(extract_video_id(args.get(i + 1).map(|s| s.as_str()).unwrap_or("")));
+        let want = args.get(i + 2).map(|s| s.as_str()).unwrap_or("none");
+        let rating = match want {
+            "like" => Rating::Like,
+            "dislike" => Rating::Dislike,
+            "none" | "clear" | "indifferent" => Rating::Indifferent,
+            other => {
+                eprintln!("unknown rating '{other}' (use like | dislike | none)");
+                std::process::exit(2);
+            }
+        };
+        if !id.is_valid() {
+            eprintln!("--rate needs a video id or URL, then like|dislike|none");
+            std::process::exit(2);
+        }
+        println!("  before: {:?}", yt.track_state(&id)?.0);
+        yt.rate(&id, rating)?;
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        println!("  after : {:?}", yt.track_state(&id)?.0);
+        return Ok(());
+    }
+
     println!("== authenticated read ==");
     // A missing account name is cosmetic; do not fail the whole check for it.
     match yt.account_name() {

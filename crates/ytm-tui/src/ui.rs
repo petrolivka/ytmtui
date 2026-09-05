@@ -513,18 +513,29 @@ fn draw_lyrics(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_spectrum(f: &mut Frame, app: &App, area: Rect) {
     let frame = app.spectrum.load_full();
-    let b = block(
+    // The border brightens on an onset: an accent that follows the music
+    // without adding another moving element to read.
+    let mut b = block(
         app,
         format!("spectrum \u{2022} {} \u{2022} {} bands", app.viz_style.name(), frame.bands.len()),
         false,
     );
+    if app.beat_glow > 0.01 {
+        b = b.border_style(Style::default().fg(app.theme.grad(app.beat_glow)));
+    }
     let inner = b.inner(area);
     f.render_widget(b, area);
     let step: u16 = if inner.width >= 60 { 2 } else { 1 };
     let bands = (inner.width / step).max(1);
     app.n_bands.store(bands as u64, Ordering::Relaxed);
     f.render_widget(
-        Spectrum { frame: &frame, style: app.viz_style, theme: &app.theme, step },
+        Spectrum {
+            frame: &frame,
+            style: app.viz_style,
+            theme: &app.theme,
+            step,
+            history: &app.history,
+        },
         inner,
     );
 }

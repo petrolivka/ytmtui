@@ -19,6 +19,8 @@ pub enum VizStyle {
     Bars,
     Mirrored,
     Scope,
+    /// Scrolling heat-map of the last few seconds.
+    Spectrogram,
 }
 
 impl VizStyle {
@@ -26,7 +28,8 @@ impl VizStyle {
         match self {
             VizStyle::Bars => VizStyle::Mirrored,
             VizStyle::Mirrored => VizStyle::Scope,
-            VizStyle::Scope => VizStyle::Bars,
+            VizStyle::Scope => VizStyle::Spectrogram,
+            VizStyle::Spectrogram => VizStyle::Bars,
         }
     }
     pub fn name(self) -> &'static str {
@@ -34,6 +37,15 @@ impl VizStyle {
             VizStyle::Bars => "bars",
             VizStyle::Mirrored => "mirrored",
             VizStyle::Scope => "scope",
+            VizStyle::Spectrogram => "spectrogram",
+        }
+    }
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "bars" => VizStyle::Bars,
+            "scope" => VizStyle::Scope,
+            "spectrogram" => VizStyle::Spectrogram,
+            _ => VizStyle::Mirrored,
         }
     }
 }
@@ -42,6 +54,8 @@ pub struct Spectrum<'a> {
     pub frame: &'a SpectrumFrame,
     pub style: VizStyle,
     pub theme: &'a Theme,
+    /// Newest-last history for the spectrogram; empty for other styles.
+    pub history: &'a std::collections::VecDeque<Vec<f32>>,
     /// Columns per band. 2 leaves a blank gutter between bars, which is the
     /// difference between reading as bars and reading as a solid mass.
     pub step: u16,
@@ -73,6 +87,7 @@ impl Widget for Spectrum<'_> {
             VizStyle::Bars => self.bars(area, buf, false),
             VizStyle::Mirrored => self.bars(area, buf, true),
             VizStyle::Scope => self.scope(area, buf),
+            VizStyle::Spectrogram => self.spectrogram(area, buf),
         }
     }
 }
@@ -145,6 +160,42 @@ impl Spectrum<'_> {
                         cell.set_char(BLOCKS[level])
                             .set_fg(dim(self.theme.grad(t), REFLECT_DIM));
                     }
+                }
+            }
+        }
+    }
+
+    /// Time runs left to right, frequency bottom to top, amplitude as colour.
+    ///
+    /// Each cell carries two frequency bins using a half block: foreground is
+    /// the upper bin, background the lower, so vertical resolution doubles for
+    /// free.
+    fn spectrogram(&self, area: Rect, buf: &mut Buffer) {
+        if self.history.is_empty() {
+            return;
+        }
+        let h = area.height as usize;
+        let w = area.width as usize;
+        let bins = h * 2;
+        // Show the most recent `w` columns, oldest on the left.
+        let start = self.history.len().saturating_sub(w);
+        for (col, frame) in self.history.iter().skip(start).enumerate() {
+            if col >= w || frame.is_empty() {
+                break;
+            }
+            let x = area.x + col as u16;
+            for row in 0..h {
+                // Row 0 is the top of the pane, so the highest frequencies.
+                let upper = bins - 1 - row * 2;
+                let lower = upper.saturating_sub(1);
+                let pick = |b: usize| -> f32 {
+                    let i = b * frame.len() / bins.max(1);
+                    frame.get(i.min(frame.len() - 1)).copied().unwrap_or(0.0)
+                };
+                if let Some(cell) = buf.cell_mut((x, area.y + row as u16)) {
+                    cell.set_char('\u{2580}')
+                        .set_fg(self.theme.grad(pick(upper)))
+                        .set_bg(self.theme.grad(pick(lower)));
                 }
             }
         }

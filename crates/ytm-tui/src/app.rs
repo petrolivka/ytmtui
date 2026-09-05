@@ -122,6 +122,11 @@ pub struct App {
     pub lyrics_scroll: u16,
     pub lyrics_loading: bool,
     pub spectrum: Arc<ArcSwap<SpectrumFrame>>,
+    /// Rolling band history for the spectrogram, newest last.
+    pub history: std::collections::VecDeque<Vec<f32>>,
+    /// Fades after an onset, so the accent pulses rather than flickers.
+    pub beat_glow: f32,
+    last_seq: u64,
     pub n_bands: Arc<AtomicU64>,
 
     pub now: TrackState,
@@ -156,11 +161,7 @@ impl App {
         let first = bar.iter().position(|d| d.is_selectable()).unwrap_or(0);
 
         let cfg = loaded.config;
-        let style = match cfg.visualizer.style.as_str() {
-            "bars" => VizStyle::Bars,
-            "scope" => VizStyle::Scope,
-            _ => VizStyle::Mirrored,
-        };
+        let style = VizStyle::parse(&cfg.visualizer.style);
         let mut app = Self {
             hit: Hitboxes::default(),
             lists: ListStates::default(),
@@ -190,6 +191,9 @@ impl App {
             lyrics: None,
             lyrics_scroll: 0,
             lyrics_loading: false,
+            history: std::collections::VecDeque::with_capacity(512),
+            beat_glow: 0.0,
+            last_seq: 0,
             spectrum,
             n_bands,
             now: TrackState::default(),
@@ -477,6 +481,7 @@ impl App {
                 AppEvent::Toast(m) => self.toast(m),
             }
         }
+        self.sample_spectrum();
         self.poll_config();
         self.poll_suggestions();
         self.maybe_autoplay();
@@ -782,6 +787,27 @@ impl App {
         let Some(chord) = chord_of(k) else { return };
         let Some(action) = self.keymap.get(&chord).copied() else { return };
         self.do_action(action);
+    }
+
+    /// Take one column of history per rendered frame, and decay the beat glow.
+    fn sample_spectrum(&mut self) {
+        let f = self.spectrum.load();
+        if f.seq == self.last_seq {
+            return;
+        }
+        self.last_seq = f.seq;
+        if !f.bands.is_empty() {
+            self.history.push_back(f.bands.clone());
+            // Bounded: only what a very wide terminal could show.
+            while self.history.len() > 512 {
+                self.history.pop_front();
+            }
+        }
+        if f.beat {
+            self.beat_glow = self.beat_glow.max(0.35 + f.beat_strength * 0.65);
+        } else {
+            self.beat_glow = (self.beat_glow - 0.06).max(0.0);
+        }
     }
 
     /// Pick up edits to config.toml without a restart. Polling the mtime a few

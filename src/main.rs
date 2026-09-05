@@ -19,6 +19,10 @@ OPTIONS:
         --list-actions  list every bindable action name
         --log-file P    append diagnostics to P (the TUI cannot print them)
         --no-restore    do not restore the previous session
+        --anonymous     ignore stored credentials; no account access at all.
+                        Use this for any automated or scripted run: a stray
+                        keystroke in a signed-in instance writes to the real
+                        account.
 ";
 
 fn main() -> Result<()> {
@@ -101,7 +105,11 @@ fn main() -> Result<()> {
         config.config.general.restore_session = false;
     }
 
-    let backend = Arc::new(ytm_api::load_backend().context("initialising YouTube Music client")?);
+    let backend: Arc<dyn ytm_api::MusicBackend> = if has("--anonymous") {
+        Arc::new(ytm_api::Innertube::anonymous().context("initialising anonymous client")?)
+    } else {
+        Arc::new(ytm_api::load_backend().context("initialising YouTube Music client")?)
+    };
     let resolver = Arc::new(ResolverCache::new(Arc::new(YtDlpResolver::new(
         config.config.audio.quality.itags(),
     ))));

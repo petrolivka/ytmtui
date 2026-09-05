@@ -24,6 +24,14 @@ const TILT_DB_PER_OCT: f32 = 1.0;
 /// amplifies the noise floor: with playback paused the bars visibly *climb*
 /// instead of resting at zero.
 const AGC_FLOOR: f32 = 1.0;
+/// Frames of spectral flux kept for the adaptive onset threshold - about a
+/// second at 60 fps, which is long enough to span a bar at most tempos.
+const FLUX_HISTORY: usize = 64;
+/// How far above the running mean flux must rise to count as an onset.
+const ONSET_SENSITIVITY: f32 = 1.5;
+/// Minimum gap between onsets. 100 ms is 600 bpm - far above any real tempo,
+/// so this only suppresses double-triggering on one transient.
+const ONSET_REFRACTORY: f32 = 0.10;
 
 /// One frame of render-ready spectrum data, normalised to 0.0..=1.0.
 #[derive(Clone, Debug, Default)]
@@ -32,6 +40,11 @@ pub struct SpectrumFrame {
     pub peaks: Vec<f32>,
     pub rms: f32,
     pub seq: u64,
+    /// True on the frame an onset was detected.
+    pub beat: bool,
+    /// How far the spectral flux exceeded its recent average, 0..=1. Drives
+    /// the strength of an accent rather than just its presence.
+    pub beat_strength: f32,
 }
 
 pub struct Analyser {
@@ -49,6 +62,13 @@ pub struct Analyser {
     peak_age: Vec<f32>,
     /// Slow rolling ceiling so quiet tracks still fill the display.
     agc: f32,
+    /// Previous frame's band values, for spectral flux.
+    prev: Vec<f32>,
+    /// Recent flux values, for the adaptive onset threshold.
+    flux_history: Vec<f32>,
+    flux_pos: usize,
+    /// Seconds since the last accepted onset, to suppress double triggers.
+    since_beat: f32,
     seq: u64,
     sample_rate: f32,
     /// Whether any audio arrived since the last `analyse`. Without this, a
@@ -106,6 +126,10 @@ impl Analyser {
             peaks: vec![0.0; n_bands],
             peak_age: vec![0.0; n_bands],
             agc: 1e-4,
+            prev: vec![0.0; n_bands],
+            flux_history: vec![0.0; FLUX_HISTORY],
+            flux_pos: 0,
+            since_beat: 1.0,
             seq: 0,
             sample_rate: sr,
             fed_since_analyse: false,
@@ -241,12 +265,40 @@ impl Analyser {
             }
         }
 
+        // Onset detection by spectral flux: the sum of increases across bands.
+        // Only rises count - energy falling away is not an attack.
+        let flux: f32 = raw
+            .iter()
+            .zip(self.prev.iter())
+            .map(|(now, before)| (now - before).max(0.0))
+            .sum::<f32>()
+            / n.max(1) as f32;
+        self.prev.copy_from_slice(&raw);
+
+        let mean = self.flux_history.iter().sum::<f32>() / FLUX_HISTORY as f32;
+        self.flux_history[self.flux_pos] = flux;
+        self.flux_pos = (self.flux_pos + 1) % FLUX_HISTORY;
+
+        self.since_beat += dt;
+        let threshold = mean * ONSET_SENSITIVITY;
+        let beat = flux > threshold && flux > 0.01 && self.since_beat >= ONSET_REFRACTORY;
+        if beat {
+            self.since_beat = 0.0;
+        }
+        let beat_strength = if mean > 1e-6 {
+            ((flux / mean - 1.0) / 2.0).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
         self.seq += 1;
         SpectrumFrame {
             bands: self.bands.clone(),
             peaks: self.peaks.clone(),
             rms,
             seq: self.seq,
+            beat,
+            beat_strength,
         }
     }
 
@@ -283,6 +335,43 @@ mod tests {
 
     fn peak(f: &SpectrumFrame) -> f32 {
         f.bands.iter().cloned().fold(0.0f32, f32::max)
+    }
+
+    /// A steady tone should not read as a stream of beats: flux only rises on
+    /// change, so a constant signal must settle to silence on the beat channel.
+    #[test]
+    fn steady_signal_produces_no_onsets() {
+        let mut a = Analyser::new(32, 48_000);
+        let tone: Vec<f32> = (0..2048 * 2)
+            .map(|i| ((i / 2) as f32 * 0.05).sin() * 0.5)
+            .collect();
+        for _ in 0..40 {
+            a.feed_interleaved(&tone, 2);
+            a.analyse(1.0 / 60.0);
+        }
+        let beats = (0..120)
+            .filter(|_| {
+                a.feed_interleaved(&tone, 2);
+                a.analyse(1.0 / 60.0).beat
+            })
+            .count();
+        assert!(beats <= 2, "steady tone produced {beats} onsets");
+    }
+
+    /// Alternating loud and quiet blocks must be detected as onsets.
+    #[test]
+    fn transients_produce_onsets() {
+        let mut a = Analyser::new(32, 48_000);
+        let mut beats = 0;
+        for i in 0..180 {
+            let amp = if i % 12 == 0 { 0.9 } else { 0.02 };
+            let block: Vec<f32> = loud_noise(1024).iter().map(|s| s * amp).collect();
+            a.feed_interleaved(&block, 2);
+            if a.analyse(1.0 / 60.0).beat {
+                beats += 1;
+            }
+        }
+        assert!(beats >= 5, "pulsed signal produced only {beats} onsets");
     }
 
     #[test]
