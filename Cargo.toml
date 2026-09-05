@@ -58,3 +58,7 @@ ytm-player = { path = "crates/ytm-player" }
 ytm-tui = { path = "crates/ytm-tui" }
 anyhow.workspace = true
 serde_json.workspace = true
+ytm-config = { path = "crates/ytm-config" }
+rodio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

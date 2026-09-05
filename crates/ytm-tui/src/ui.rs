@@ -12,6 +12,7 @@ use std::sync::atomic::Ordering;
 use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
 use ytm_api::SearchFilter;
+use ytm_config::Action;
 use ytm_core::{fmt_duration, PlayerStatus, Row};
 
 use crate::app::{App, Focus, Mode};
@@ -436,45 +437,54 @@ fn draw_toast(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_help(f: &mut Frame, app: &App, area: Rect) {
-    let rows = [
-        ("/", "search"),
-        ("Enter", "open: play a track, or descend into album/artist/playlist"),
-        ("Esc", "back"),
-        ("Tab", "cycle sidebar / content / queue"),
-        ("[ ]", "previous / next search tab"),
-        ("g / G", "go to artist / album of the selection"),
-        ("o / e", "play next / add to end of queue"),
-        ("x", "remove from queue"),
-        ("Space", "play / pause"),
-        ("n / p", "next / previous (previous restarts if >3s in)"),
-        ("\u{2190} \u{2192}", "seek 5s   (with Shift: 30s)"),
-        ("9 / 0", "volume down / up"),
-        ("+ or l", "thumbs up (toggles)"),
-        ("- or d", "thumbs down (toggles, then skips)"),
-        ("a", "add to / remove from library (not the same as a like)"),
-        ("R / A", "radio from selection / toggle autoplay"),
-        ("s / r", "shuffle / repeat mode"),
-        ("v / z", "cycle visualiser style / fullscreen"),
-        ("? / q", "this help / quit"),
+    // Generated from the live keymap, so it can never drift from what the keys
+    // actually do - including a user's rebindings.
+    let order: &[Action] = &[
+        Action::Search, Action::Activate, Action::Back, Action::NextPane,
+        Action::PrevTab, Action::NextTab, Action::GoToArtist, Action::GoToAlbum,
+        Action::TogglePause, Action::Next, Action::Prev,
+        Action::SeekBackward, Action::SeekForward,
+        Action::VolumeDown, Action::VolumeUp,
+        Action::PlayNext, Action::Enqueue, Action::RemoveFromQueue,
+        Action::ThumbsUp, Action::ThumbsDown, Action::ToggleLibrary,
+        Action::AddToPlaylist, Action::ToggleSubscribe, Action::CopyLink,
+        Action::StartRadio, Action::ToggleAutoplay,
+        Action::ToggleShuffle, Action::CycleRepeat,
+        Action::ToggleLyrics, Action::CycleVisualizer,
+        Action::ToggleVisualizerFullscreen, Action::CommandPalette,
+        Action::Help, Action::Quit,
     ];
-    let w = 72.min(area.width.saturating_sub(4));
-    let h = (rows.len() as u16 + 2).min(area.height.saturating_sub(2));
+
+    let mut lines: Vec<Line> = Vec::new();
+    for a in order {
+        let mut binds: Vec<String> = app
+            .keymap
+            .iter()
+            .filter(|(_, act)| *act == a)
+            .map(|(c, _)| c.to_string())
+            .collect();
+        if binds.is_empty() {
+            continue;
+        }
+        binds.sort_by_key(|b| (b.chars().count(), b.clone()));
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {:<14}", binds.join(" / ")),
+                Style::default().fg(app.theme.accent).bold(),
+            ),
+            Span::styled(a.label().to_string(), Style::default().fg(app.theme.fg)),
+        ]));
+    }
+
+    let w = 74.min(area.width.saturating_sub(4));
+    let h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2));
     let r = Rect {
-        x: area.x + (area.width - w) / 2,
+        x: area.x + (area.width.saturating_sub(w)) / 2,
         y: area.y + (area.height.saturating_sub(h)) / 2,
         width: w,
         height: h,
     };
     f.render_widget(Clear, r);
-    let lines: Vec<Line> = rows
-        .iter()
-        .map(|(k, d)| {
-            Line::from(vec![
-                Span::styled(format!("  {k:<8}"), Style::default().fg(app.theme.accent).bold()),
-                Span::styled((*d).to_string(), Style::default().fg(app.theme.fg)),
-            ])
-        })
-        .collect();
     f.render_widget(
         Paragraph::new(lines).block(
             Block::default()

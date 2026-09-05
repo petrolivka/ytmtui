@@ -1,6 +1,8 @@
 //! Terminal UI: state, rendering, and the main loop.
 
 pub mod app;
+pub mod clipboard;
+pub mod keymap;
 pub mod nav;
 pub mod spectrum;
 pub mod theme;
@@ -20,12 +22,14 @@ pub fn restore_terminal() {
     ratatui::restore();
 }
 
-/// Frame-rate cap. M0 measured ~119 fps uncapped, which roughly doubled
-/// visualiser CPU for no visible gain, so this is load-bearing.
-const MAX_FPS: u64 = 60;
-
-pub fn run(backend: Arc<dyn MusicBackend>, player: PlayerHandle, tap: Tap) -> Result<()> {
-    let mut app = App::new(backend, player, tap);
+pub fn run(
+    backend: Arc<dyn MusicBackend>,
+    player: PlayerHandle,
+    tap: Tap,
+    config: ytm_config::Loaded,
+) -> Result<()> {
+    let max_fps = config.config.visualizer.max_fps.clamp(15, 144) as u64;
+    let mut app = App::new(backend, player, tap, config);
     // `ratatui::init()` panics when there is no controlling terminal; use the
     // fallible form so a headless invocation gets an explanation instead.
     let mut terminal = ratatui::try_init().map_err(|e| {
@@ -36,7 +40,7 @@ pub fn run(backend: Arc<dyn MusicBackend>, player: PlayerHandle, tap: Tap) -> Re
              terminal window instead."
         )
     })?;
-    let frame_budget = Duration::from_millis(1000 / MAX_FPS);
+    let frame_budget = Duration::from_millis(1000 / max_fps);
 
     let res = (|| -> Result<()> {
         while !app.should_quit {

@@ -8,15 +8,18 @@ use anyhow::Result;
 use arc_swap::ArcSwap;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use ytm_api::{MusicBackend, SearchFilter};
+use ytm_config::{Action, Chord, Config};
 use ytm_core::{PlayState, Rating, Row, Track, VideoId};
 use ytm_player::engine::Command as PCmd;
 use ytm_player::{PlayerHandle, Tap, CHANNELS, SAMPLE_RATE};
 use ytm_viz::{Analyser, SpectrumFrame};
 
+use crate::keymap::chord_of;
 use crate::nav::{sidebar, Dest, Page, View};
 use crate::spectrum::VizStyle;
 use crate::theme::Theme;
@@ -58,6 +61,8 @@ pub struct App {
     pub backend: Arc<dyn MusicBackend>,
     pub player: PlayerHandle,
     pub theme: Theme,
+    pub config: Config,
+    pub keymap: HashMap<Chord, Action>,
 
     pub mode: Mode,
     pub focus: Focus,
@@ -89,7 +94,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(backend: Arc<dyn MusicBackend>, player: PlayerHandle, tap: Tap) -> Self {
+    pub fn new(
+        backend: Arc<dyn MusicBackend>,
+        player: PlayerHandle,
+        tap: Tap,
+        loaded: ytm_config::Loaded,
+    ) -> Self {
         let (tx, rx) = mpsc::channel();
         let spectrum = Arc::new(ArcSwap::from_pointee(SpectrumFrame::default()));
         let n_bands = Arc::new(AtomicU64::new(96));
@@ -100,10 +110,17 @@ impl App {
         let bar = sidebar(authed);
         let first = bar.iter().position(|d| d.is_selectable()).unwrap_or(0);
 
+        let cfg = loaded.config;
+        let style = match cfg.visualizer.style.as_str() {
+            "bars" => VizStyle::Bars,
+            "scope" => VizStyle::Scope,
+            _ => VizStyle::Mirrored,
+        };
         let mut app = Self {
             backend,
             player,
-            theme: Theme::default(),
+            theme: Theme::from_config(&cfg),
+            keymap: loaded.keymap,
             mode: Mode::Normal,
             focus: Focus::Content,
             query: String::new(),
@@ -111,7 +128,7 @@ impl App {
             sidebar: bar,
             sidebar_sel: first,
             queue_sel: 0,
-            viz_style: VizStyle::Mirrored,
+            viz_style: style,
             viz_fullscreen: false,
             show_help: false,
             spectrum,
@@ -119,7 +136,8 @@ impl App {
             now: TrackState::default(),
             toast: None,
             should_quit: false,
-            autoplay: true,
+            autoplay: cfg.general.autoplay,
+            config: cfg,
             prev_state: PlayState::Stopped,
             prev_track: None,
             radio_pending: false,
@@ -129,6 +147,9 @@ impl App {
             quit_flag,
         };
         app.go(View::Home);
+        for w in loaded.warnings {
+            app.toast(w);
+        }
         if !authed {
             app.toast("anonymous mode - account features disabled".into());
         }
@@ -546,6 +567,8 @@ impl App {
     // ---- input -------------------------------------------------------------
 
     pub fn handle_key(&mut self, k: KeyEvent) {
+        // Text entry swallows keys before the keymap sees them, otherwise typing
+        // a query would trigger bindings.
         if self.mode == Mode::Search {
             match k.code {
                 KeyCode::Esc => self.mode = Mode::Normal,
@@ -565,40 +588,43 @@ impl App {
             self.show_help = false;
             return;
         }
+        let Some(chord) = chord_of(k) else { return };
+        let Some(action) = self.keymap.get(&chord).copied() else { return };
+        self.do_action(action);
+    }
 
-        let shift = k.modifiers.contains(KeyModifiers::SHIFT);
-        match k.code {
-            KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.should_quit = true
-            }
-            KeyCode::Char('?') => self.show_help = true,
-            KeyCode::Char('/') => {
+    /// Every binding, and later the command palette, funnels through here.
+    pub fn do_action(&mut self, action: Action) {
+        use Action::*;
+        match action {
+            Quit => self.should_quit = true,
+            Help => self.show_help = true,
+            Search => {
                 self.mode = Mode::Search;
                 self.query.clear();
             }
-            KeyCode::Tab => {
+            CommandPalette => self.toast("command palette: not yet".into()),
+            NextPane => {
                 self.focus = match self.focus {
                     Focus::Sidebar => Focus::Content,
                     Focus::Content => Focus::Queue,
                     Focus::Queue => Focus::Sidebar,
                 }
             }
-            KeyCode::BackTab => {
+            PrevPane => {
                 self.focus = match self.focus {
                     Focus::Sidebar => Focus::Queue,
                     Focus::Content => Focus::Sidebar,
                     Focus::Queue => Focus::Content,
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') => self.move_sel(1),
-            KeyCode::Up | KeyCode::Char('k') => self.move_sel(-1),
-            KeyCode::PageDown => self.move_sel(10),
-            KeyCode::PageUp => self.move_sel(-10),
-            KeyCode::Home => self.move_sel(-9999),
-            KeyCode::End => self.move_sel(9999),
-
-            KeyCode::Enter => match self.focus {
+            Down => self.move_sel(1),
+            Up => self.move_sel(-1),
+            PageDown => self.move_sel(10),
+            PageUp => self.move_sel(-10),
+            Top => self.move_sel(-9999),
+            Bottom => self.move_sel(9999),
+            Activate => match self.focus {
                 Focus::Sidebar => {
                     if let Some(Dest::Go(v)) = self.sidebar.get(self.sidebar_sel).cloned() {
                         self.go(v);
@@ -607,67 +633,86 @@ impl App {
                 Focus::Content => self.activate(),
                 Focus::Queue => self.player.send(PCmd::JumpTo(self.queue_sel)),
             },
-            KeyCode::Esc | KeyCode::Backspace => {
+            Back => {
                 if self.viz_fullscreen {
                     self.viz_fullscreen = false;
                 } else {
                     self.back();
                 }
             }
-            KeyCode::Char('[') => self.cycle_search_tab(false),
-            KeyCode::Char(']') => self.cycle_search_tab(true),
-            KeyCode::Char('g') => self.goto_related(true),
-            KeyCode::Char('G') => self.goto_related(false),
+            NextTab => self.cycle_search_tab(true),
+            PrevTab => self.cycle_search_tab(false),
+            GoToArtist => self.goto_related(true),
+            GoToAlbum => self.goto_related(false),
 
-            KeyCode::Char('o') => {
+            TogglePause => self.player.send(PCmd::TogglePause),
+            Next => self.player.send(PCmd::Next),
+            Prev => self.player.send(PCmd::Prev),
+            SeekForward => self.player.send(PCmd::SeekRelative(5.0)),
+            SeekBackward => self.player.send(PCmd::SeekRelative(-5.0)),
+            SeekForwardLong => self.player.send(PCmd::SeekRelative(30.0)),
+            SeekBackwardLong => self.player.send(PCmd::SeekRelative(-30.0)),
+            VolumeUp => {
+                let v = (self.player.status().volume + 0.05).min(1.5);
+                self.player.send(PCmd::SetVolume(v));
+            }
+            VolumeDown => {
+                let v = (self.player.status().volume - 0.05).max(0.0);
+                self.player.send(PCmd::SetVolume(v));
+            }
+            ToggleShuffle => self.player.send(PCmd::ToggleShuffle),
+            CycleRepeat => self.player.send(PCmd::CycleRepeat),
+            StartRadio => self.start_radio_from_selection(),
+            ToggleAutoplay => {
+                self.autoplay = !self.autoplay;
+                let on = self.autoplay;
+                self.toast(format!("autoplay {}", if on { "on" } else { "off" }));
+            }
+
+            PlayNext => {
                 if let Some(t) = self.selected_track() {
                     let title = t.title.clone();
                     self.player.send(PCmd::PlayNext(t));
                     self.toast(format!("playing next: {title}"));
                 }
             }
-            KeyCode::Char('e') => {
+            Enqueue => {
                 if let Some(t) = self.selected_track() {
                     let title = t.title.clone();
                     self.player.send(PCmd::Enqueue(t));
                     self.toast(format!("queued: {title}"));
                 }
             }
-            KeyCode::Char('x') | KeyCode::Delete => {
+            RemoveFromQueue => {
                 if self.focus == Focus::Queue {
                     self.player.send(PCmd::RemoveAt(self.queue_sel));
                 }
             }
 
-            KeyCode::Char(' ') => self.player.send(PCmd::TogglePause),
-            KeyCode::Char('n') => self.player.send(PCmd::Next),
-            KeyCode::Char('p') => self.player.send(PCmd::Prev),
-            KeyCode::Right => self.player.send(PCmd::SeekRelative(if shift { 30.0 } else { 5.0 })),
-            KeyCode::Left => self.player.send(PCmd::SeekRelative(if shift { -30.0 } else { -5.0 })),
-            KeyCode::Char('s') => self.player.send(PCmd::ToggleShuffle),
-            KeyCode::Char('r') => self.player.send(PCmd::CycleRepeat),
-            KeyCode::Char('R') => self.start_radio_from_selection(),
-            KeyCode::Char('A') => {
-                self.autoplay = !self.autoplay;
-                let on = self.autoplay;
-                self.toast(format!("autoplay {}", if on { "on" } else { "off" }));
-            }
-            KeyCode::Char('0') => {
-                let v = (self.player.status().volume + 0.05).min(1.5);
-                self.player.send(PCmd::SetVolume(v));
-            }
-            KeyCode::Char('9') => {
-                let v = (self.player.status().volume - 0.05).max(0.0);
-                self.player.send(PCmd::SetVolume(v));
-            }
+            ThumbsUp => self.rate_current(Rating::Like),
+            ThumbsDown => self.rate_current(Rating::Dislike),
+            ToggleLibrary => self.toggle_library(),
+            AddToPlaylist => self.toast("add to playlist: not yet".into()),
+            ToggleSubscribe => self.toast("subscribe: not yet".into()),
+            CopyLink => self.copy_link(),
 
-            KeyCode::Char('+') | KeyCode::Char('l') => self.rate_current(Rating::Like),
-            KeyCode::Char('-') | KeyCode::Char('d') => self.rate_current(Rating::Dislike),
-            KeyCode::Char('a') => self.toggle_library(),
+            CycleVisualizer => self.viz_style = self.viz_style.next(),
+            ToggleVisualizerFullscreen => self.viz_fullscreen = !self.viz_fullscreen,
+            ToggleLyrics => self.toast("lyrics: not yet".into()),
+        }
+    }
 
-            KeyCode::Char('v') => self.viz_style = self.viz_style.next(),
-            KeyCode::Char('z') => self.viz_fullscreen = !self.viz_fullscreen,
-            _ => {}
+    /// Put a share link on the clipboard, falling back to showing it if no
+    /// clipboard tool is available (headless, or over plain SSH).
+    fn copy_link(&mut self) {
+        let Some(t) = self.selected_track().or_else(|| self.player.status().current.clone()) else {
+            self.toast("nothing selected".into());
+            return;
+        };
+        let url = format!("https://music.youtube.com/watch?v={}", t.id);
+        match crate::clipboard::copy(&url) {
+            Ok(via) => self.toast(format!("link copied ({via})")),
+            Err(_) => self.toast(url),
         }
     }
 

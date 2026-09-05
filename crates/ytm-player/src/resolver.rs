@@ -44,10 +44,17 @@ pub struct YtDlpResolver {
     pub itag_preference: Vec<&'static str>,
 }
 
+impl YtDlpResolver {
+    /// Preference order comes from the audio quality setting.
+    pub fn new(itag_preference: Vec<&'static str>) -> Self {
+        Self { itag_preference }
+    }
+}
+
 impl Default for YtDlpResolver {
     fn default() -> Self {
         // 251 = opus ~160k (best), 140 = aac 128k, then the low tiers.
-        Self { itag_preference: vec!["251", "140", "250", "249"] }
+        Self::new(vec!["251", "140", "250", "249"])
     }
 }
 
