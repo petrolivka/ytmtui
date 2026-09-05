@@ -331,6 +331,11 @@ pub fn track_from(item: &Value) -> Option<Track> {
     }
 
     let (feedback_token_add, feedback_token_remove, in_library) = library_tokens(item);
+    let set_video_id = item
+        .get("playlistItemData")
+        .and_then(|d| d.get("playlistSetVideoId"))
+        .and_then(|d| d.as_str())
+        .map(|s| s.to_string());
 
     Some(Track {
         id: vid,
@@ -344,6 +349,7 @@ pub fn track_from(item: &Value) -> Option<Track> {
         in_library,
         album_id,
         artist_id,
+        set_video_id,
     })
 }
 

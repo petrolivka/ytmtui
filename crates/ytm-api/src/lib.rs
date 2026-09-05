@@ -6,7 +6,7 @@ pub mod json;
 pub mod parse;
 
 use anyhow::Result;
-use ytm_core::{BrowseId, Rating, Track, VideoId};
+use ytm_core::{BrowseId, PlaylistId, Rating, Track, VideoId};
 
 pub use innertube::{ExploreSection, Innertube, LibrarySection, RowPage, SearchFilter};
 
@@ -22,6 +22,12 @@ pub trait MusicBackend: Send + Sync {
     fn continue_rows(&self, token: &str) -> Result<RowPage>;
     /// Lyrics for a track, or None when YouTube Music has none.
     fn lyrics(&self, id: &VideoId) -> Result<Option<String>>;
+    fn create_playlist(&self, title: &str, description: &str) -> Result<PlaylistId>;
+    fn delete_playlist(&self, id: &PlaylistId) -> Result<()>;
+    fn rename_playlist(&self, id: &PlaylistId, title: &str) -> Result<()>;
+    fn playlist_add(&self, id: &PlaylistId, video: &VideoId) -> Result<()>;
+    fn playlist_remove(&self, id: &PlaylistId, video: &VideoId, set_video_id: &str) -> Result<()>;
+    fn set_subscribed(&self, channel: &BrowseId, subscribed: bool) -> Result<()>;
     fn artist(&self, id: &BrowseId) -> Result<RowPage>;
     fn album(&self, id: &BrowseId) -> Result<RowPage>;
     fn playlist(&self, id: &BrowseId) -> Result<RowPage>;
@@ -57,6 +63,24 @@ impl MusicBackend for Innertube {
     }
     fn lyrics(&self, id: &VideoId) -> Result<Option<String>> {
         Innertube::lyrics(self, id)
+    }
+    fn create_playlist(&self, title: &str, description: &str) -> Result<PlaylistId> {
+        Innertube::create_playlist(self, title, description)
+    }
+    fn delete_playlist(&self, id: &PlaylistId) -> Result<()> {
+        Innertube::delete_playlist(self, id)
+    }
+    fn rename_playlist(&self, id: &PlaylistId, title: &str) -> Result<()> {
+        Innertube::rename_playlist(self, id, title)
+    }
+    fn playlist_add(&self, id: &PlaylistId, video: &VideoId) -> Result<()> {
+        Innertube::playlist_add(self, id, video)
+    }
+    fn playlist_remove(&self, id: &PlaylistId, video: &VideoId, set_video_id: &str) -> Result<()> {
+        Innertube::playlist_remove(self, id, video, set_video_id)
+    }
+    fn set_subscribed(&self, channel: &BrowseId, subscribed: bool) -> Result<()> {
+        Innertube::set_subscribed(self, channel, subscribed)
     }
     fn artist(&self, id: &BrowseId) -> Result<RowPage> {
         Innertube::artist(self, id)

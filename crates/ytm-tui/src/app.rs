@@ -14,12 +14,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use ytm_api::{MusicBackend, SearchFilter};
 use ytm_config::{Action, Chord, Config};
-use ytm_core::{PlayState, Rating, Row, Track, VideoId};
+use ytm_core::{PlayState, PlaylistRef, Rating, Row, Track, VideoId};
 use ytm_player::engine::Command as PCmd;
 use ytm_player::{PlayerHandle, Tap, CHANNELS, SAMPLE_RATE};
 use ytm_viz::{Analyser, SpectrumFrame};
 
 use crate::keymap::chord_of;
+use crate::modal::{filter_actions, Confirm, Modal, Prompt};
 use crate::nav::{sidebar, Dest, Page, View};
 use crate::spectrum::VizStyle;
 use crate::theme::Theme;
@@ -55,6 +56,9 @@ pub enum AppEvent {
     RadioFrom(Track, Result<Vec<Track>, String>),
     TrackState(VideoId, TrackState),
     Lyrics(VideoId, Result<Option<String>, String>),
+    Playlists(Result<Vec<PlaylistRef>, String>),
+    /// A write finished; refresh whatever view is showing.
+    Wrote(String, bool),
     Toast(String),
 }
 
@@ -78,6 +82,9 @@ pub struct App {
     pub viz_fullscreen: bool,
     pub show_help: bool,
     pub show_lyrics: bool,
+    pub modal: Option<Modal>,
+    pub search_history: Vec<String>,
+    history_pos: Option<usize>,
     /// Lyrics for the track they belong to, so a stale fetch is never shown
     /// against the wrong song.
     pub lyrics: Option<(VideoId, Option<String>)>,
@@ -139,6 +146,9 @@ impl App {
             viz_fullscreen: false,
             show_help: false,
             show_lyrics: false,
+            modal: None,
+            search_history: crate::session::load_search_history(),
+            history_pos: None,
             lyrics: None,
             lyrics_scroll: 0,
             lyrics_loading: false,
@@ -402,6 +412,24 @@ impl App {
                         }
                     }
                 }
+                AppEvent::Playlists(r) => {
+                    if let Some(Modal::PlaylistPicker { playlists, loading, .. }) = &mut self.modal {
+                        *loading = false;
+                        match r {
+                            Ok(p) => *playlists = p,
+                            Err(e) => {
+                                self.modal = None;
+                                self.toast(format!("playlists failed: {e}"));
+                            }
+                        }
+                    }
+                }
+                AppEvent::Wrote(msg, reload) => {
+                    self.toast(msg);
+                    if reload {
+                        self.reload_current();
+                    }
+                }
                 AppEvent::Toast(m) => self.toast(m),
             }
         }
@@ -635,6 +663,11 @@ impl App {
         if q.is_empty() {
             return;
         }
+        self.history_pos = None;
+        self.search_history.retain(|h| h != &q);
+        self.search_history.insert(0, q.clone());
+        self.search_history.truncate(50);
+        crate::session::save_search_history(&self.search_history);
         self.go(View::Search { query: q, filter });
     }
 
@@ -655,6 +688,11 @@ impl App {
     // ---- input -------------------------------------------------------------
 
     pub fn handle_key(&mut self, k: KeyEvent) {
+        // Overlays own the keyboard while they are up.
+        if self.modal.is_some() {
+            self.modal_key(k);
+            return;
+        }
         // Text entry swallows keys before the keymap sees them, otherwise typing
         // a query would trigger bindings.
         if self.mode == Mode::Search {
@@ -667,7 +705,13 @@ impl App {
                 KeyCode::Backspace => {
                     self.query.pop();
                 }
-                KeyCode::Char(c) => self.query.push(c),
+                // Recall previous searches (FR-S3).
+                KeyCode::Up => self.recall_search(1),
+                KeyCode::Down => self.recall_search(-1),
+                KeyCode::Char(c) => {
+                    self.query.push(c);
+                    self.history_pos = None;
+                }
                 _ => {}
             }
             return;
@@ -681,7 +725,282 @@ impl App {
         self.do_action(action);
     }
 
-    /// Every binding, and later the command palette, funnels through here.
+    fn recall_search(&mut self, delta: isize) {
+        if self.search_history.is_empty() {
+            return;
+        }
+        let n = self.search_history.len() as isize;
+        let next = match self.history_pos {
+            None if delta > 0 => 0,
+            None => return,
+            Some(p) => (p as isize + delta).clamp(-1, n - 1),
+        };
+        if next < 0 {
+            self.history_pos = None;
+            self.query.clear();
+            return;
+        }
+        self.history_pos = Some(next as usize);
+        self.query = self.search_history[next as usize].clone();
+    }
+
+    fn modal_key(&mut self, k: KeyEvent) {
+        let Some(modal) = self.modal.as_mut() else { return };
+        match modal {
+            Modal::Palette { query, sel } => match k.code {
+                KeyCode::Esc => self.modal = None,
+                KeyCode::Up => *sel = sel.saturating_sub(1),
+                KeyCode::Down => *sel += 1,
+                KeyCode::Backspace => {
+                    query.pop();
+                    *sel = 0;
+                }
+                KeyCode::Char(c) => {
+                    query.push(c);
+                    *sel = 0;
+                }
+                KeyCode::Enter => {
+                    let matches = filter_actions(query);
+                    let chosen = matches.get(*sel).copied();
+                    self.modal = None;
+                    if let Some(a) = chosen {
+                        self.do_action(a);
+                    }
+                }
+                _ => {}
+            },
+            Modal::PlaylistPicker { playlists, sel, track, .. } => match k.code {
+                KeyCode::Esc => self.modal = None,
+                KeyCode::Up => *sel = sel.saturating_sub(1),
+                KeyCode::Down => *sel = (*sel + 1).min(playlists.len()),
+                KeyCode::Enter => {
+                    let t = track.clone();
+                    // Index 0 is always "new playlist"; the rest are existing ones.
+                    if *sel == 0 {
+                        self.modal = Some(Modal::Text {
+                            title: "new playlist".into(),
+                            value: String::new(),
+                            prompt: Prompt::NewPlaylist { then_add: Some(t) },
+                        });
+                    } else {
+                        let target = playlists.get(*sel - 1).cloned();
+                        self.modal = None;
+                        if let Some(p) = target {
+                            self.add_to_playlist(p, t);
+                        }
+                    }
+                }
+                _ => {}
+            },
+            Modal::Text { value, prompt, .. } => match k.code {
+                KeyCode::Esc => self.modal = None,
+                KeyCode::Backspace => {
+                    value.pop();
+                }
+                KeyCode::Char(c) => value.push(c),
+                KeyCode::Enter => {
+                    let (v, p) = (value.clone(), prompt.clone());
+                    self.modal = None;
+                    if !v.trim().is_empty() {
+                        self.submit_prompt(p, v);
+                    }
+                }
+                _ => {}
+            },
+            Modal::Confirm { confirm, .. } => match k.code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    let c = confirm.clone();
+                    self.modal = None;
+                    self.submit_confirm(c);
+                }
+                _ => self.modal = None,
+            },
+        }
+    }
+
+    fn submit_prompt(&mut self, prompt: Prompt, value: String) {
+        let b = self.backend.clone();
+        let tx = self.tx.clone();
+        match prompt {
+            Prompt::NewPlaylist { then_add } => {
+                std::thread::spawn(move || {
+                    let msg = match b.create_playlist(&value, "") {
+                        Ok(id) => match then_add {
+                            Some(t) => match b.playlist_add(&id, &t.id) {
+                                Ok(()) => format!("created '{value}' and added {}", t.title),
+                                Err(e) => format!("created '{value}' but adding failed: {e}"),
+                            },
+                            None => format!("created playlist '{value}'"),
+                        },
+                        Err(e) => format!("create failed: {e}"),
+                    };
+                    let _ = tx.send(AppEvent::Wrote(msg, true));
+                });
+            }
+            Prompt::RenamePlaylist { id } => {
+                std::thread::spawn(move || {
+                    let msg = match b.rename_playlist(&id, &value) {
+                        Ok(()) => format!("renamed to '{value}'"),
+                        Err(e) => format!("rename failed: {e}"),
+                    };
+                    let _ = tx.send(AppEvent::Wrote(msg, true));
+                });
+            }
+        }
+    }
+
+    fn submit_confirm(&mut self, confirm: Confirm) {
+        let b = self.backend.clone();
+        let tx = self.tx.clone();
+        match confirm {
+            Confirm::DeletePlaylist { id, title } => {
+                std::thread::spawn(move || {
+                    let msg = match b.delete_playlist(&id) {
+                        Ok(()) => format!("deleted '{title}'"),
+                        Err(e) => format!("delete failed: {e}"),
+                    };
+                    let _ = tx.send(AppEvent::Wrote(msg, true));
+                });
+            }
+        }
+    }
+
+    fn add_to_playlist(&mut self, p: PlaylistRef, t: Track) {
+        let Some(pid) = p.playlist_id.clone().or_else(|| {
+            p.id.0.strip_prefix("VL").map(|x| ytm_core::PlaylistId(x.to_string()))
+        }) else {
+            self.toast("that playlist has no usable id".into());
+            return;
+        };
+        let b = self.backend.clone();
+        let tx = self.tx.clone();
+        let (title, ptitle) = (t.title.clone(), p.title.clone());
+        std::thread::spawn(move || {
+            let msg = match b.playlist_add(&pid, &t.id) {
+                Ok(()) => format!("added {title} to {ptitle}"),
+                Err(e) => format!("add failed: {e}"),
+            };
+            let _ = tx.send(AppEvent::Wrote(msg, false));
+        });
+    }
+
+    fn open_playlist_picker(&mut self) {
+        let Some(track) = self.selected_track().or_else(|| self.player.status().current.clone())
+        else {
+            self.toast("nothing selected".into());
+            return;
+        };
+        if !self.backend.is_authenticated() {
+            self.toast("not signed in".into());
+            return;
+        }
+        self.modal = Some(Modal::PlaylistPicker {
+            track,
+            playlists: Vec::new(),
+            sel: 0,
+            loading: true,
+        });
+        let b = self.backend.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let r = b
+                .library(ytm_api::LibrarySection::Playlists)
+                .map(|p| {
+                    p.rows
+                        .into_iter()
+                        .filter_map(|r| match r {
+                            Row::Playlist(p) => Some(p),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .map_err(|e| e.to_string());
+            let _ = tx.send(AppEvent::Playlists(r));
+        });
+    }
+
+    /// The playlist this view is showing, if any - the target for rename,
+    /// delete and remove-from.
+    fn current_playlist(&self) -> Option<(ytm_core::PlaylistId, String)> {
+        let p = self.page()?;
+        match &p.view {
+            View::Playlist(id, title) => {
+                let pid = id
+                    .0
+                    .strip_prefix("VL")
+                    .map(|x| ytm_core::PlaylistId(x.to_string()))
+                    .unwrap_or_else(|| ytm_core::PlaylistId(id.0.clone()));
+                Some((pid, title.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn remove_from_playlist(&mut self) {
+        let Some((pid, _)) = self.current_playlist() else {
+            self.toast("not viewing a playlist".into());
+            return;
+        };
+        let Some(t) = self.selected_track() else {
+            self.toast("no track selected".into());
+            return;
+        };
+        let Some(svid) = t.set_video_id.clone() else {
+            // Without the per-playlist item id the API cannot identify the row.
+            self.toast("this row cannot be removed (no playlist item id)".into());
+            return;
+        };
+        let b = self.backend.clone();
+        let tx = self.tx.clone();
+        let title = t.title.clone();
+        std::thread::spawn(move || {
+            let msg = match b.playlist_remove(&pid, &t.id, &svid) {
+                Ok(()) => format!("removed {title}"),
+                Err(e) => format!("remove failed: {e}"),
+            };
+            let _ = tx.send(AppEvent::Wrote(msg, true));
+        });
+    }
+
+    fn toggle_subscribe(&mut self) {
+        // The artist is whatever the cursor is on, else the current page.
+        let target = match self.page().and_then(|p| p.selected()) {
+            Some(Row::Artist(a)) => Some((a.id.clone(), a.name.clone())),
+            _ => match self.page().map(|p| &p.view) {
+                Some(View::Artist(id, name)) => Some((id.clone(), name.clone())),
+                _ => None,
+            },
+        };
+        let Some((id, name)) = target else {
+            self.toast("select an artist first".into());
+            return;
+        };
+        let b = self.backend.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            // There is no read for the current state here, so this subscribes;
+            // running it again from the library unsubscribes.
+            let msg = match b.set_subscribed(&id, true) {
+                Ok(()) => format!("subscribed to {name}"),
+                Err(e) => format!("subscribe failed: {e}"),
+            };
+            let _ = tx.send(AppEvent::Wrote(msg, true));
+        });
+    }
+
+    fn reload_current(&mut self) {
+        let Some(p) = self.stack.last() else { return };
+        let view = p.view.clone();
+        self.generation += 1;
+        let gen = self.generation;
+        if let Some(p) = self.stack.last_mut() {
+            p.generation = gen;
+            p.loading = true;
+        }
+        self.fetch(view, gen);
+    }
+
+    /// Every binding, and the command palette, funnels through here.
     pub fn do_action(&mut self, action: Action) {
         use Action::*;
         match action {
@@ -691,7 +1010,9 @@ impl App {
                 self.mode = Mode::Search;
                 self.query.clear();
             }
-            CommandPalette => self.toast("command palette: not yet".into()),
+            CommandPalette => {
+                self.modal = Some(Modal::Palette { query: String::new(), sel: 0 })
+            }
             NextPane => {
                 self.focus = match self.focus {
                     Focus::Sidebar => Focus::Content,
@@ -780,8 +1101,35 @@ impl App {
             ThumbsUp => self.rate_current(Rating::Like),
             ThumbsDown => self.rate_current(Rating::Dislike),
             ToggleLibrary => self.toggle_library(),
-            AddToPlaylist => self.toast("add to playlist: not yet".into()),
-            ToggleSubscribe => self.toast("subscribe: not yet".into()),
+            AddToPlaylist => self.open_playlist_picker(),
+            NewPlaylist => {
+                self.modal = Some(Modal::Text {
+                    title: "new playlist".into(),
+                    value: String::new(),
+                    prompt: Prompt::NewPlaylist { then_add: None },
+                })
+            }
+            RenamePlaylist => match self.current_playlist() {
+                Some((id, title)) => {
+                    self.modal = Some(Modal::Text {
+                        title: "rename playlist".into(),
+                        value: title,
+                        prompt: Prompt::RenamePlaylist { id },
+                    })
+                }
+                None => self.toast("open a playlist first".into()),
+            },
+            DeletePlaylist => match self.current_playlist() {
+                Some((id, title)) => {
+                    self.modal = Some(Modal::Confirm {
+                        message: format!("Delete playlist '{title}'?  y / n"),
+                        confirm: Confirm::DeletePlaylist { id, title },
+                    })
+                }
+                None => self.toast("open a playlist first".into()),
+            },
+            RemoveFromPlaylist => self.remove_from_playlist(),
+            ToggleSubscribe => self.toggle_subscribe(),
             CopyLink => self.copy_link(),
 
             CycleVisualizer => self.viz_style = self.viz_style.next(),

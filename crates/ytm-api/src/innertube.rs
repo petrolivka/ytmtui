@@ -10,7 +10,7 @@ use sha1::{Digest, Sha1};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use ytm_core::{BrowseId, Rating, Row, Track, VideoId};
+use ytm_core::{BrowseId, PlaylistId, Rating, Row, Track, VideoId};
 
 use crate::{json, parse};
 
@@ -517,6 +517,86 @@ impl Innertube {
         };
         self.post(endpoint, json!({ "target": { "videoId": id.0 } }))?;
         Ok(())
+    }
+
+    /// Create a playlist and return its id.
+    pub fn create_playlist(&self, title: &str, description: &str) -> Result<PlaylistId> {
+        self.require_auth()?;
+        let v = self.post(
+            "playlist/create",
+            json!({ "title": title, "description": description, "privacyStatus": "PRIVATE" }),
+        )?;
+        let id = v
+            .get("playlistId")
+            .and_then(|x| x.as_str())
+            .or_else(|| json::find(&v, "playlistId").and_then(|x| x.as_str()))
+            .context("no playlistId in create response")?;
+        self.invalidate_library();
+        Ok(PlaylistId(id.to_string()))
+    }
+
+    pub fn delete_playlist(&self, id: &PlaylistId) -> Result<()> {
+        self.require_auth()?;
+        self.post("playlist/delete", json!({ "playlistId": id.0 }))?;
+        self.invalidate_library();
+        Ok(())
+    }
+
+    pub fn rename_playlist(&self, id: &PlaylistId, title: &str) -> Result<()> {
+        self.require_auth()?;
+        self.post(
+            "browse/edit_playlist",
+            json!({ "playlistId": id.0, "actions": [{ "action": "ACTION_SET_PLAYLIST_NAME", "playlistName": title }] }),
+        )?;
+        self.invalidate_library();
+        Ok(())
+    }
+
+    pub fn playlist_add(&self, id: &PlaylistId, video: &VideoId) -> Result<()> {
+        self.require_auth()?;
+        self.post(
+            "browse/edit_playlist",
+            json!({ "playlistId": id.0, "actions": [{ "action": "ACTION_ADD_VIDEO", "addedVideoId": video.0 }] }),
+        )?;
+        self.invalidate_library();
+        Ok(())
+    }
+
+    /// Removing needs both ids: the video id and the id identifying that entry
+    /// *within this playlist*.
+    pub fn playlist_remove(&self, id: &PlaylistId, video: &VideoId, set_video_id: &str) -> Result<()> {
+        self.require_auth()?;
+        self.post(
+            "browse/edit_playlist",
+            json!({ "playlistId": id.0, "actions": [{
+                "action": "ACTION_REMOVE_VIDEO",
+                "removedVideoId": video.0,
+                "setVideoId": set_video_id,
+            }] }),
+        )?;
+        self.invalidate_library();
+        Ok(())
+    }
+
+    pub fn set_subscribed(&self, channel: &BrowseId, subscribed: bool) -> Result<()> {
+        self.require_auth()?;
+        let endpoint = if subscribed { "subscription/subscribe" } else { "subscription/unsubscribe" };
+        self.post(endpoint, json!({ "channelIds": [channel.0] }))?;
+        self.invalidate_library();
+        Ok(())
+    }
+
+    fn require_auth(&self) -> Result<()> {
+        if self.auth.is_none() {
+            bail!("not signed in");
+        }
+        Ok(())
+    }
+
+    /// Drop cached library pages after a write, so the change shows up.
+    fn invalidate_library(&self) {
+        let mut c = self.cache.lock().unwrap();
+        c.retain(|k, _| !k.starts_with("browse|") || !k.contains("FEmusic_"));
     }
 
     /// Add to or remove from the library. This is a different operation from

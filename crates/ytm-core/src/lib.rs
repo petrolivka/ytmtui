@@ -63,6 +63,9 @@ pub struct Track {
     /// Targets for "go to album" / "go to artist" navigation.
     pub album_id: Option<BrowseId>,
     pub artist_id: Option<BrowseId>,
+    /// Identifies this track *within a particular playlist*; required to
+    /// remove it, and not the same as the video id.
+    pub set_video_id: Option<String>,
 }
 
 impl Track {
@@ -79,6 +82,7 @@ impl Track {
             in_library: false,
             album_id: None,
             artist_id: None,
+            set_video_id: None,
         }
     }
 

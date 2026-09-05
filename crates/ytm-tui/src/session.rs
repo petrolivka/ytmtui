@@ -54,3 +54,25 @@ pub fn save(s: &Session) {
         }
     }
 }
+
+fn history_path() -> Option<PathBuf> {
+    ytm_config::state_dir().map(|d| d.join("search_history.txt"))
+}
+
+/// Recent searches, most recent first (FR-S3).
+pub fn load_search_history() -> Vec<String> {
+    let Some(p) = history_path() else { return Vec::new() };
+    std::fs::read_to_string(p)
+        .map(|t| t.lines().map(|l| l.to_string()).filter(|l| !l.is_empty()).collect())
+        .unwrap_or_default()
+}
+
+pub fn save_search_history(h: &[String]) {
+    let Some(p) = history_path() else { return };
+    if let Some(dir) = p.parent() {
+        if std::fs::create_dir_all(dir).is_err() {
+            return;
+        }
+    }
+    let _ = std::fs::write(p, h.join("\n"));
+}

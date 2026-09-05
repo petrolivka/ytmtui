@@ -16,6 +16,7 @@ use ytm_config::Action;
 use ytm_core::{fmt_duration, PlayerStatus, Row};
 
 use crate::app::{App, Focus, Mode};
+use crate::modal::Modal;
 use crate::nav::Dest;
 use crate::spectrum::Spectrum;
 
@@ -100,6 +101,140 @@ pub fn draw(f: &mut Frame, app: &App) {
     draw_toast(f, app, area);
     if app.show_help {
         draw_help(f, app, area);
+    }
+    if app.modal.is_some() {
+        draw_modal(f, app, area);
+    }
+}
+
+/// Centred overlay box of the given size.
+fn centred(area: Rect, w: u16, h: u16) -> Rect {
+    let w = w.min(area.width.saturating_sub(4));
+    let h = h.min(area.height.saturating_sub(2));
+    Rect {
+        x: area.x + (area.width.saturating_sub(w)) / 2,
+        y: area.y + (area.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    }
+}
+
+fn draw_modal(f: &mut Frame, app: &App, area: Rect) {
+    let Some(modal) = &app.modal else { return };
+    let b = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(app.theme.border_focus))
+        .title(format!(" {} ", modal.title()));
+
+    match modal {
+        Modal::Palette { query, sel } => {
+            let matches = crate::modal::filter_actions(query);
+            let r = centred(area, 62, (matches.len() as u16 + 4).min(18));
+            f.render_widget(Clear, r);
+            let inner = b.inner(r);
+            f.render_widget(b, r);
+            let [head, list] =
+                Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(": ", Style::default().fg(app.theme.accent)),
+                    Span::raw(query.clone()),
+                    Span::styled("\u{2588}", Style::default().fg(app.theme.accent)),
+                ])),
+                head,
+            );
+            if matches.is_empty() {
+                f.render_widget(Paragraph::new("no matching action").fg(app.theme.dim), list);
+                return;
+            }
+            let items: Vec<ListItem> = matches
+                .iter()
+                .map(|a| {
+                    // Show the binding too, so the palette teaches the keymap.
+                    let bind = app
+                        .keymap
+                        .iter()
+                        .find(|(_, act)| *act == a)
+                        .map(|(c, _)| c.to_string())
+                        .unwrap_or_default();
+                    ListItem::new(Line::from(vec![
+                        Span::styled(format!("  {:<34}", a.label()), Style::default().fg(app.theme.fg)),
+                        Span::styled(bind, Style::default().fg(app.theme.dim)),
+                    ]))
+                })
+                .collect();
+            let mut st = ListState::default();
+            st.select(Some((*sel).min(matches.len() - 1)));
+            f.render_stateful_widget(
+                List::new(items).highlight_style(
+                    Style::default().bg(app.theme.selection_bg).add_modifier(Modifier::BOLD),
+                ),
+                list,
+                &mut st,
+            );
+        }
+        Modal::PlaylistPicker { track, playlists, sel, loading } => {
+            let r = centred(area, 58, (playlists.len() as u16 + 5).min(18));
+            f.render_widget(Clear, r);
+            let inner = b.inner(r);
+            f.render_widget(b, r);
+            let [head, list] =
+                Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(inner);
+            f.render_widget(
+                Paragraph::new(truncate(&track.title, inner.width as usize))
+                    .style(Style::default().fg(app.theme.accent)),
+                head,
+            );
+            if *loading {
+                f.render_widget(Paragraph::new("loading playlists\u{2026}").fg(app.theme.dim), list);
+                return;
+            }
+            let mut items = vec![ListItem::new(Line::from(Span::styled(
+                "  + new playlist\u{2026}",
+                Style::default().fg(app.theme.ok),
+            )))];
+            items.extend(playlists.iter().map(|p| {
+                ListItem::new(Line::from(Span::styled(
+                    format!("  {}", truncate(&p.title, inner.width as usize - 2)),
+                    Style::default().fg(app.theme.fg),
+                )))
+            }));
+            let mut st = ListState::default();
+            st.select(Some((*sel).min(items.len() - 1)));
+            f.render_stateful_widget(
+                List::new(items).highlight_style(
+                    Style::default().bg(app.theme.selection_bg).add_modifier(Modifier::BOLD),
+                ),
+                list,
+                &mut st,
+            );
+        }
+        Modal::Text { value, .. } => {
+            let r = centred(area, 56, 3);
+            f.render_widget(Clear, r);
+            let inner = b.inner(r);
+            f.render_widget(b, r);
+            f.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::raw(value.clone()),
+                    Span::styled("\u{2588}", Style::default().fg(app.theme.accent)),
+                ])),
+                inner,
+            );
+        }
+        Modal::Confirm { message, .. } => {
+            let r = centred(area, (message.width() as u16 + 4).max(28), 3);
+            f.render_widget(Clear, r);
+            let inner = b.inner(r);
+            f.render_widget(b, r);
+            f.render_widget(
+                Paragraph::new(message.clone())
+                    .style(Style::default().fg(app.theme.error))
+                    .alignment(Alignment::Center),
+                inner,
+            );
+        }
     }
 }
 

@@ -3,6 +3,7 @@
 pub mod app;
 pub mod clipboard;
 pub mod keymap;
+pub mod modal;
 pub mod nav;
 pub mod session;
 pub mod spectrum;

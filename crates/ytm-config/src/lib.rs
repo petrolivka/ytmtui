@@ -214,6 +214,8 @@ pub fn default_keymap() -> Vec<(Chord, Action)> {
         (c('d'), A::ThumbsDown),
         (c('a'), A::ToggleLibrary),
         (c('P'), A::AddToPlaylist),
+        (c('N'), A::NewPlaylist),
+        (c('X'), A::RemoveFromPlaylist),
         (c('S'), A::ToggleSubscribe),
         (c('y'), A::CopyLink),
         (c('v'), A::CycleVisualizer),
