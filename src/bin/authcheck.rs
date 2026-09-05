@@ -56,6 +56,21 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Inspect the autoplay continuation for a track. Read-only.
+    if let Some(i) = args.iter().position(|a| a == "--radio") {
+        let seed = ytm_core::VideoId(extract_video_id(args.get(i + 1).map(|s| s.as_str()).unwrap_or("")));
+        if !seed.is_valid() {
+            eprintln!("--radio needs a video id or URL");
+            std::process::exit(2);
+        }
+        let r = yt.radio(&seed)?;
+        println!("radio seeded from {seed}: {} tracks", r.len());
+        for t in r.iter().take(12) {
+            println!("  {:11}  {:>7}  {} - {}", t.id, t.duration_str(), t.title, t.artist);
+        }
+        return Ok(());
+    }
+
     println!("== authenticated read ==");
     // A missing account name is cosmetic; do not fail the whole check for it.
     match yt.account_name() {

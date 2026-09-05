@@ -253,7 +253,8 @@ fn draw_now_playing(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect)
     let rating = status.current.as_ref().map(|t| t.rating).unwrap_or_default();
 
     let flags = format!(
-        "{}{}  {}  vol {:>3.0}%",
+        "{}{}{}  {}  vol {:>3.0}%",
+        if app.autoplay { "" } else { "autoplay:off " },
         if status.shuffle { "shuffle " } else { "" },
         status.repeat.glyph(),
         rating.glyph(),
@@ -325,7 +326,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect) 
         (format!(" {err}"), Style::default().fg(app.theme.error))
     } else {
         (
-            " space play/pause  n/p next/prev  \u{2190}/\u{2192} seek  9/0 vol  + like  - dislike  s shuffle  r repeat  v viz  z zoom  ? help  q quit"
+            " space play/pause  n/p next/prev  \u{2190}/\u{2192} seek  9/0 vol  + like  - dislike  R radio  s shuffle  r repeat  v viz  ? help  q quit"
                 .to_string(),
             Style::default().fg(app.theme.dim),
         )
@@ -369,6 +370,8 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         ("+ or l", "thumbs up (toggles)"),
         ("- or d", "thumbs down (toggles, then skips)"),
         ("s / r", "shuffle / repeat mode"),
+        ("R", "start radio from selection"),
+        ("A", "toggle autoplay when the queue ends"),
         ("Tab", "switch pane"),
         ("v / z", "cycle visualiser style / fullscreen"),
         ("? / q", "this help / quit"),

@@ -135,6 +135,25 @@ impl Innertube {
         Ok(json::find(&v, "accountName").and_then(json::text))
     }
 
+    /// Radio / autoplay queue seeded from a track, i.e. what the official
+    /// player continues with when a queue runs dry.
+    pub fn radio(&self, seed: &VideoId) -> Result<Vec<Track>> {
+        let v = self.post(
+            "next",
+            json!({
+                "videoId": seed.0,
+                // "RDAMVM<id>" is the song-radio mix for a given track.
+                "playlistId": format!("RDAMVM{}", seed.0),
+                "isAudioOnly": true,
+            }),
+        )?;
+        let mut tracks = parse_queue_tracks(&v);
+        // The mix includes the seed itself, not always first; the caller
+        // already has it queued.
+        tracks.retain(|t| t.id != *seed);
+        Ok(tracks)
+    }
+
     /// The Liked Songs auto-playlist.
     pub fn liked_songs(&self) -> Result<Vec<Track>> {
         let v = self.post("browse", json!({ "browseId": "FEmusic_liked_videos" }))?;
@@ -227,6 +246,53 @@ fn parse_tracks(v: &Value) -> Vec<Track> {
             title,
             artist,
             album,
+            duration,
+            feedback_token_add: None,
+            feedback_token_remove: None,
+            rating: Rating::Indifferent,
+        });
+    }
+    out
+}
+
+/// Watch-queue rows use a different renderer from search and library rows.
+fn parse_queue_tracks(v: &Value) -> Vec<Track> {
+    let mut items = Vec::new();
+    json::find_all(v, "playlistPanelVideoRenderer", &mut items);
+
+    let mut out: Vec<Track> = Vec::new();
+    for it in items {
+        let Some(id) = it.get("videoId").and_then(|x| x.as_str()) else {
+            continue;
+        };
+        let vid = VideoId(id.to_string());
+        if !vid.is_valid() || out.iter().any(|t| t.id == vid) {
+            continue;
+        }
+        let title = it.get("title").and_then(json::text).unwrap_or_default();
+        if title.is_empty() {
+            continue;
+        }
+        let byline = it
+            .get("longBylineText")
+            .or_else(|| it.get("shortBylineText"))
+            .map(json::runs)
+            .unwrap_or_default();
+        let artist = byline
+            .iter()
+            .find(|s| s.trim() != "\u{2022}" && !s.trim().is_empty())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        let duration = it
+            .get("lengthText")
+            .and_then(json::find_duration)
+            .map(Duration::from_secs);
+
+        out.push(Track {
+            id: vid,
+            title,
+            artist,
+            album: None,
             duration,
             feedback_token_add: None,
             feedback_token_remove: None,

@@ -18,6 +18,8 @@ pub enum Command {
     /// Replace the queue and start at `index`.
     PlayQueue { tracks: Vec<Track>, index: usize },
     Enqueue(Track),
+    /// Append an autoplay continuation, and resume if the queue had run dry.
+    AppendRadio(Vec<Track>),
     PlayNext(Track),
     JumpTo(usize),
     RemoveAt(usize),
@@ -153,6 +155,17 @@ impl Engine {
                 self.start(0.0);
             }
             Command::Enqueue(t) => self.queue.push(t),
+            Command::AppendRadio(tracks) => {
+                if tracks.is_empty() {
+                    return;
+                }
+                let was_empty_ahead = self.index + 1 >= self.queue.len();
+                self.queue.extend(tracks);
+                if self.state == PlayState::Stopped && was_empty_ahead {
+                    self.index += 1;
+                    self.start(0.0);
+                }
+            }
             Command::PlayNext(t) => {
                 let at = (self.index + 1).min(self.queue.len());
                 self.queue.insert(at, t);

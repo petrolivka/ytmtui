@@ -12,6 +12,8 @@ pub use innertube::Innertube;
 pub trait MusicBackend: Send + Sync {
     fn search_songs(&self, query: &str) -> Result<Vec<Track>>;
     fn liked_songs(&self) -> Result<Vec<Track>>;
+    /// Autoplay continuation seeded from a track.
+    fn radio(&self, seed: &VideoId) -> Result<Vec<Track>>;
     fn rate(&self, id: &VideoId, rating: Rating) -> Result<()>;
     fn is_authenticated(&self) -> bool;
 }
@@ -22,6 +24,9 @@ impl MusicBackend for Innertube {
     }
     fn liked_songs(&self) -> Result<Vec<Track>> {
         Innertube::liked_songs(self)
+    }
+    fn radio(&self, seed: &VideoId) -> Result<Vec<Track>> {
+        Innertube::radio(self, seed)
     }
     fn rate(&self, id: &VideoId, rating: Rating) -> Result<()> {
         Innertube::rate(self, id, rating)

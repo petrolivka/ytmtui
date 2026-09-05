@@ -212,8 +212,8 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 |---|---|---|
 | FR-Q1 | Visible, editable queue: reorder, remove, jump-to, clear | M |
 | FR-Q2 | "Play next" vs "Add to queue" as distinct actions | M |
-| FR-Q3 | **Autoplay/radio**: when the queue drains, continue with a station seeded from the last track (`music_radio`) — matching official behaviour, toggleable | M |
-| FR-Q4 | "Start radio" from any song/artist/album/playlist | M |
+| FR-Q3 | ✅ **Autoplay/radio**: when the queue drains, continue with a station seeded from the last track — matching official behaviour, toggleable with `A` | M |
+| FR-Q4 | ✅ "Start radio" from the selected song (`R`); artist/album/playlist seeds pending their entity pages | M |
 | FR-Q5 | Queue persisted across restarts (track + position) | S |
 
 ### 6.7 Ratings & social — *the like/dislike surface*

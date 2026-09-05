@@ -34,6 +34,10 @@ pub enum Mode {
 
 pub enum AppEvent {
     Search(Result<Vec<Track>, String>),
+    /// An autoplay continuation, ready to append to the running queue.
+    Radio(Result<Vec<Track>, String>),
+    /// A radio started deliberately from a selection, replacing the queue.
+    RadioFrom(Track, Result<Vec<Track>, String>),
     Toast(String),
 }
 
@@ -60,6 +64,11 @@ pub struct App {
 
     pub toast: Option<(String, Instant)>,
     pub should_quit: bool,
+    /// Continue with a station when the queue runs dry, as the official
+    /// player does (FR-Q3).
+    pub autoplay: bool,
+    prev_state: ytm_core::PlayState,
+    radio_pending: bool,
 
     tx: Sender<AppEvent>,
     rx: Receiver<AppEvent>,
@@ -94,6 +103,9 @@ impl App {
             n_bands,
             toast: None,
             should_quit: false,
+            autoplay: true,
+            prev_state: ytm_core::PlayState::Stopped,
+            radio_pending: false,
             tx,
             rx,
             quit_flag,
@@ -127,14 +139,87 @@ impl App {
                     self.searching = false;
                     self.toast(format!("search failed: {e}"));
                 }
+                AppEvent::Radio(r) => {
+                    self.radio_pending = false;
+                    match r {
+                        Ok(t) if !t.is_empty() => {
+                            self.toast(format!("radio: {} more tracks", t.len()));
+                            self.player.send(PCmd::AppendRadio(t));
+                        }
+                        Ok(_) => self.toast("radio returned nothing".into()),
+                        Err(e) => self.toast(format!("radio failed: {e}")),
+                    }
+                }
+                AppEvent::RadioFrom(seed, r) => {
+                    self.radio_pending = false;
+                    match r {
+                        Ok(more) => {
+                            let title = seed.title.clone();
+                            let mut q = vec![seed];
+                            q.extend(more);
+                            self.toast(format!("radio from {title} ({} tracks)", q.len()));
+                            self.player.send(PCmd::PlayQueue { tracks: q, index: 0 });
+                        }
+                        Err(e) => self.toast(format!("radio failed: {e}")),
+                    }
+                }
                 AppEvent::Toast(m) => self.toast(m),
             }
         }
+
+        self.maybe_autoplay();
         if let Some((_, t)) = &self.toast {
             if t.elapsed() > Duration::from_secs(6) {
                 self.toast = None;
             }
         }
+    }
+
+    /// When the queue runs dry, continue with a station seeded from the track
+    /// that just finished - matching the official player rather than falling
+    /// silent.
+    fn maybe_autoplay(&mut self) {
+        use ytm_core::PlayState;
+        let st = self.player.status();
+        let stopped_just_now = self.prev_state == PlayState::Playing && st.state == PlayState::Stopped;
+        self.prev_state = st.state;
+
+        if !stopped_just_now || !self.autoplay || self.radio_pending {
+            return;
+        }
+        // Only when we actually ran off the end of the queue.
+        if st.queue.is_empty() || st.queue_index + 1 < st.queue.len() {
+            return;
+        }
+        let Some(seed) = st.queue.get(st.queue_index).cloned() else { return };
+
+        self.radio_pending = true;
+        self.toast("queue finished - starting radio\u{2026}".into());
+        let b = self.backend.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let r = b.radio(&seed.id).map_err(|e| e.to_string());
+            let _ = tx.send(AppEvent::Radio(r));
+        });
+    }
+
+    /// Start a station from the highlighted track (FR-Q4).
+    fn start_radio_from_selection(&mut self) {
+        let Some(seed) = self.selected_track() else {
+            self.toast("nothing selected".into());
+            return;
+        };
+        if self.radio_pending {
+            return;
+        }
+        self.radio_pending = true;
+        self.toast(format!("starting radio from {}\u{2026}", seed.title));
+        let b = self.backend.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let r = b.radio(&seed.id).map_err(|e| e.to_string());
+            let _ = tx.send(AppEvent::RadioFrom(seed, r));
+        });
     }
 
     fn load_liked(&mut self) {
@@ -303,6 +388,12 @@ impl App {
             KeyCode::Char('p') => self.player.send(PCmd::Prev),
             KeyCode::Right => self.player.send(PCmd::SeekRelative(if shift { 30.0 } else { 5.0 })),
             KeyCode::Left => self.player.send(PCmd::SeekRelative(if shift { -30.0 } else { -5.0 })),
+            KeyCode::Char('R') => self.start_radio_from_selection(),
+            KeyCode::Char('A') => {
+                self.autoplay = !self.autoplay;
+                let on = self.autoplay;
+                self.toast(format!("autoplay {}", if on { "on" } else { "off" }));
+            }
             KeyCode::Char('s') => self.player.send(PCmd::ToggleShuffle),
             KeyCode::Char('r') => self.player.send(PCmd::CycleRepeat),
             KeyCode::Char('0') => {
