@@ -3,11 +3,13 @@
 What still needs a human decision before this repository goes public. Nothing
 here is a code change; it is all things only the owner can settle.
 
+The repository is `https://github.com/petrolivka/ytmtui`, already set as
+`origin`, and every URL in the tree points at it.
+
 ## Must do
 
 | | Where | Why |
 |---|---|---|
-| **Replace `OWNER`** with the real GitHub account | `Cargo.toml`, `README.md`, `contrib/packaging/PKGBUILD`, `contrib/packaging/ytmtui.rb`, `.github/ISSUE_TEMPLATE/config.yml`, `docs/M5-STATUS.md` | The repository URL was never known, so it is a placeholder rather than a guess that would silently point at nothing. |
 | **Confirm the maintainer email** | `contrib/packaging/PKGBUILD` | It is the git author address, so it is already in the history — but a package file publishes it more prominently, and that invites spam. Substitute an alias if you would rather. |
 | **Enable private vulnerability reporting** | GitHub → Settings → Security | `SECURITY.md` and the issue-template link both point at a security advisory form that must be switched on. |
 
@@ -49,7 +51,7 @@ not been verified. Check before a first publish.
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets     # must be clean
 cargo test --workspace
-cargo publish --dry-run                    # after replacing OWNER
+cargo publish --dry-run
 ```
 
 Then tag `v0.1.0`; the release workflow builds Linux x86-64, Linux aarch64 and

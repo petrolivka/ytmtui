@@ -4,7 +4,7 @@
 
 **A YouTube Music client for the terminal, with a live audio spectrum where the album art would be.**
 
-[![CI](https://github.com/OWNER/ytmtui/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/ytmtui/actions/workflows/ci.yml)
+[![CI](https://github.com/petrolivka/ytmtui/actions/workflows/ci.yml/badge.svg)](https://github.com/petrolivka/ytmtui/actions/workflows/ci.yml)
 [![Licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
@@ -102,7 +102,7 @@ anything.
 ## Building from source
 
 ```bash
-git clone https://github.com/OWNER/ytmtui
+git clone https://github.com/petrolivka/ytmtui
 cd ytmtui
 cargo build --release
 ./target/release/ytmtui
@@ -244,12 +244,6 @@ targets are in [`fuzz/`](fuzz) and need nightly.
 
 Security issues: see [SECURITY.md](SECURITY.md).
 
-## Publishing
-
-If you are forking or standing this up yourself, `docs/PUBLISHING.md` lists what
-still needs a human decision — the `OWNER` placeholder in the repository URLs
-above being the first.
-
 ## Documentation
 
 The project was designed before it was built, and each milestone is written up
@@ -258,7 +252,7 @@ with what was found — including what turned out to be wrong.
 - [Analysis & requirements](docs/ANALYSIS-AND-REQUIREMENTS.md) — requirements, architecture, risk register
 - [Technology risk analysis](docs/TECH-STACK-RISK-ANALYSIS.md) — why Rust, and why ffmpeg + yt-dlp
 - [M0 findings](docs/M0-FINDINGS.md) — the spike that de-risked the stack
-- [Publishing checklist](docs/PUBLISHING.md) — what to settle before going public
+- [Publishing checklist](docs/PUBLISHING.md) — what to settle before a first release
 - Milestones: [M1](docs/M1-STATUS.md) · [M2](docs/M2-STATUS.md) · [M3](docs/M3-STATUS.md) · [M4](docs/M4-STATUS.md) · [M5](docs/M5-STATUS.md)
 
 ## Licence

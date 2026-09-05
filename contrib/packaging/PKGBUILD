@@ -4,7 +4,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="A YouTube Music client for the terminal, with a live audio spectrum"
 arch=('x86_64' 'aarch64')
-url="https://github.com/OWNER/ytmtui"
+url="https://github.com/petrolivka/ytmtui"
 license=('GPL-3.0-or-later')
 # ffmpeg decodes; yt-dlp resolves stream URLs. Neither is optional.
 depends=('ffmpeg' 'yt-dlp' 'alsa-lib')
