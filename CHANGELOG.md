@@ -22,8 +22,14 @@ what was built and what was learned.
   when the queue runs dry.
 - **Account** — thumbs up/down, add to library (kept distinct from a like),
   playlist create/rename/delete/add/remove, artist subscribe.
-- **Visualiser** — bars, mirrored, oscilloscope and spectrogram styles, with
-  beat-driven accents and analyser constants tuned from measured percentiles.
+- **Visualiser** — bars, mirrored, oscilloscope, spectrogram, chroma, doom-fire
+  and ink styles, with beat-driven accents and analyser constants tuned from
+  measured percentiles. The oscilloscope, fire and ink are drawn as real pixels
+  through sixel or the Kitty protocol, falling back to half blocks elsewhere.
+- **Chroma** — the spectrum folded into twelve pitch classes and scrolled as a
+  strip, so what shows is which notes are sounding rather than where the energy
+  is. Rows run up the circle of fifths, which puts the seven notes of a key on
+  seven neighbouring rows.
 - **Album art** — half-block, sixel and Kitty graphics backends.
 - **Lyrics** — plain from YouTube Music, time-synced from LRCLIB.
 - **Integration** — MPRIS2, desktop notifications, ListenBrainz scrobbling, and
@@ -50,6 +56,22 @@ what was built and what was learned.
   without a total and a progress bar that never filled.
 - Four actions were added to the enum but not the palette catalogue, making them
   unreachable.
+- Album art was stretched: every backend assumed a terminal cell is exactly
+  twice as tall as it is wide, so the cover came out wider than it was tall in
+  any font that is not 2:1. The cell is now measured, and the pane is fitted to
+  a square in both directions; `art.cell_aspect` overrides the measurement
+  where the terminal will not report one, tmux included.
+- The previous visualiser style flickered through the fire. Cells holding a
+  picture drawn as a raw escape are skipped by the renderer's diff, so they are
+  never repainted - which keeps the picture alive across frames, but also meant
+  whatever was drawn there before was never erased, and the terminal painted it
+  back on top. The cells are now cleared once before being skipped, taken back
+  through the diff when the picture goes away, and the Kitty transmit names a
+  placement so each frame replaces the last instead of deleting it first.
+- The oscilloscope was not one. It drew the band values mirrored about the
+  midline - the spectrum in a different shape - rather than the waveform. The
+  analyser now publishes the time-domain samples, and the trace is started at a
+  rising zero crossing so it holds still.
 
 ### Security
 

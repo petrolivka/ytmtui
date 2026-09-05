@@ -3884,6 +3884,7 @@ dependencies = [
  "anyhow",
  "base64",
  "image",
+ "libc",
  "reqwest",
  "tracing",
 ]

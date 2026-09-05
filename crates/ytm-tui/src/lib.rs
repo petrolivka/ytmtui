@@ -1,12 +1,17 @@
 //! Terminal UI: state, rendering, and the main loop.
 
 pub mod app;
+pub mod canvas;
 pub mod clipboard;
 pub mod cover;
+pub mod fire;
+pub mod ink;
 pub mod keymap;
 pub mod modal;
 pub mod nav;
 pub mod notify;
+pub mod pixel;
+pub mod scope;
 pub mod session;
 pub mod spectrum;
 pub mod theme;
@@ -36,7 +41,7 @@ fn draw_graphics_cover(app: &App) -> Result<()> {
         let had = app.hit.painted.borrow_mut().take();
         if had.is_some() && app.art_backend == ytm_art::Backend::Kitty {
             let mut out = std::io::stdout().lock();
-            out.write_all(ytm_art::kitty_delete().as_bytes())?;
+            out.write_all(ytm_art::kitty_delete(ytm_art::COVER_IMAGE_ID).as_bytes())?;
             out.flush()?;
         }
         Ok(())
@@ -92,7 +97,7 @@ fn draw_graphics_cover(app: &App) -> Result<()> {
     // does not move an existing one, so after a resize the old placement would
     // otherwise stay where it was.
     if app.art_backend == ytm_art::Backend::Kitty {
-        out.write_all(ytm_art::kitty_delete().as_bytes())?;
+        out.write_all(ytm_art::kitty_delete(ytm_art::COVER_IMAGE_ID).as_bytes())?;
     }
     // Save the cursor, position it over the pane, draw, restore.
     write!(out, "\x1b7\x1b[{};{}H", area.y + 1, area.x + 1)?;
@@ -111,6 +116,86 @@ fn draw_graphics_cover(app: &App) -> Result<()> {
     write!(out, "\x1b8")?;
     out.flush()?;
     *app.hit.painted.borrow_mut() = Some((want, area));
+    Ok(())
+}
+
+/// Paint a pixel visualiser through the terminal's graphics protocol.
+///
+/// Same trick as the cover - the cells are reserved, the picture written after
+/// the frame - with one difference that matters: it changes every frame, so
+/// there is nothing to cache. All that is tracked is whether anything was
+/// painted, so it can be wiped once the style changes.
+fn draw_graphics_viz(app: &App) -> Result<()> {
+    use std::io::Write;
+
+    let area = app.hit.viz.get();
+    let wanted = app.viz_style.is_pixel()
+        && cover::is_graphics(app.art_backend)
+        && app.modal.is_none()
+        && !app.show_help
+        && area.width > 0
+        && area.height > 0;
+    if !wanted {
+        return erase_graphics_viz(app);
+    }
+    let Some(img) = app.pixels.image() else {
+        return Ok(());
+    };
+
+    let mut out = std::io::stdout().lock();
+    // Save the cursor, position it over the pane, draw, restore.
+    write!(out, "\x1b7\x1b[{};{}H", area.y + 1, area.x + 1)?;
+    match app.art_backend {
+        ytm_art::Backend::Kitty => {
+            // No delete first: the transmit names a placement id, so it
+            // replaces the previous frame in one step. Deleting would leave a
+            // gap in which the cells underneath show through - which at sixty
+            // frames a second is a flicker, not a gap.
+            out.write_all(ytm_art::to_kitty_rgb(img, area.width, area.height).as_bytes())?;
+        }
+        ytm_art::Backend::Sixel => {
+            // Sixel knows nothing about cells, so the picture has to be
+            // exactly the pane's pixels. The scope already is - its whole
+            // point is resolution - while the simulations run smaller and get
+            // blown up. Nearest neighbour on purpose there: chunky pixels are
+            // the look, and interpolating them costs time for a blurrier one.
+            let cell = ytm_art::cell_px();
+            let (w, h) = (
+                area.width as u32 * cell.w as u32,
+                area.height as u32 * cell.h as u32,
+            );
+            if img.width() == w && img.height() == h {
+                out.write_all(ytm_art::sixel::encode(img).as_bytes())?;
+            } else {
+                let scaled = ytm_art::scale_nearest(img, w, h);
+                out.write_all(ytm_art::sixel::encode(&scaled).as_bytes())?;
+            }
+        }
+        _ => {}
+    }
+    write!(out, "\x1b8")?;
+    out.flush()?;
+    app.hit.viz_painted.set(Some(area));
+    Ok(())
+}
+
+/// Forget a graphics visualiser that is no longer being drawn.
+///
+/// A sixel is only pixels in the grid, and `ui::draw` has already forced the
+/// cells over it back through the diff, so the frame that stopped drawing it
+/// painted over it. A Kitty placement is an object rather than pixels:
+/// text does not touch it, and it has to be deleted outright.
+fn erase_graphics_viz(app: &App) -> Result<()> {
+    use std::io::Write;
+
+    if app.hit.viz_painted.take().is_none() {
+        return Ok(());
+    }
+    if app.art_backend == ytm_art::Backend::Kitty {
+        let mut out = std::io::stdout().lock();
+        out.write_all(ytm_art::kitty_delete(ytm_art::VIZ_IMAGE_ID).as_bytes())?;
+        out.flush()?;
+    }
     Ok(())
 }
 
@@ -157,6 +242,7 @@ pub fn run(
             let t0 = Instant::now();
             terminal.draw(|f| ui::draw(f, &app))?;
             draw_graphics_cover(&app)?;
+            draw_graphics_viz(&app)?;
             app.tick();
             // Spend whatever is left of the frame waiting for input, so an idle
             // app costs nothing but a keypress is still handled immediately.
@@ -169,11 +255,13 @@ pub fn run(
 
     app.shutdown();
     // A Kitty placement outlives the alternate screen on some terminals, so
-    // leaving one behind would put an album cover in the user's shell.
+    // leaving one behind would put an album cover, or a fire, in the user's
+    // shell.
     if app.art_backend == ytm_art::Backend::Kitty {
         use std::io::Write;
         let mut out = std::io::stdout().lock();
-        let _ = out.write_all(ytm_art::kitty_delete().as_bytes());
+        let _ = out.write_all(ytm_art::kitty_delete(ytm_art::COVER_IMAGE_ID).as_bytes());
+        let _ = out.write_all(ytm_art::kitty_delete(ytm_art::VIZ_IMAGE_ID).as_bytes());
         let _ = out.flush();
     }
     if mouse_on {

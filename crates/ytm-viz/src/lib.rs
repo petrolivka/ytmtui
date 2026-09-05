@@ -5,4 +5,4 @@
 //! real tracks during the M0 spike, not chosen by eye. See `docs/M0-FINDINGS.md`.
 
 pub mod analyser;
-pub use analyser::{Analyser, SpectrumFrame, FFT_SIZE};
+pub use analyser::{Analyser, SpectrumFrame, FFT_SIZE, N_CHROMA};

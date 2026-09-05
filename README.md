@@ -53,7 +53,7 @@ never sign in, and `--anonymous` forces it.
 | **Playback** | Gapless, crossfade, seek, 0.5–2× speed with pitch preserved, loudness levelling |
 | **Queue** | Reorder-free editing, shuffle, repeat, radio and autoplay |
 | **Account** | Thumbs up/down, add to library, playlist editing, subscribe |
-| **Visualiser** | Bars, mirrored, oscilloscope, spectrogram; beat-driven accents |
+| **Visualiser** | Bars, mirrored, oscilloscope, spectrogram, chroma, doom fire, ink; beat-driven accents |
 | **Album art** | Half-block (works anywhere), sixel, or the Kitty protocol |
 | **Lyrics** | Plain from YouTube Music, time-synced from LRCLIB |
 | **Integration** | MPRIS2, media keys, desktop notifications, ListenBrainz, a control socket |

@@ -19,7 +19,8 @@ use crate::app::{App, Focus, Mode};
 use crate::cover::{self, Cover};
 use crate::modal::Modal;
 use crate::nav::Dest;
-use crate::spectrum::Spectrum;
+use crate::spectrum::{Spectrum, VizStyle};
+use ytm_viz::N_CHROMA;
 
 const MIN_W: u16 = 44;
 const MIN_H: u16 = 10;
@@ -29,6 +30,19 @@ const MEDIUM: u16 = 82;
 
 pub fn draw(f: &mut Frame, app: &App) {
     let area = f.area();
+
+    // A picture written as a raw escape is invisible to the renderer's diff -
+    // its cells are skipped, so they are never repainted, and nothing would
+    // ever erase it. Force the last known position of each one through; a
+    // picture still being drawn marks its own cells skipped again below, so
+    // this costs nothing until one goes away.
+    if let Some((_, at)) = app.hit.painted.borrow().as_ref() {
+        cover::reclaim(*at, f.buffer_mut());
+    }
+    if let Some(at) = app.hit.viz_painted.get() {
+        cover::reclaim(at, f.buffer_mut());
+    }
+
     if area.width < MIN_W || area.height < MIN_H {
         f.render_widget(
             Paragraph::new(format!(
@@ -39,6 +53,10 @@ pub fn draw(f: &mut Frame, app: &App) {
             .fg(app.theme.error),
             area,
         );
+        // Both graphics panes are written as raw escapes outside the frame, so
+        // a stale rectangle here would keep painting over the message.
+        app.hit.cover.set(Rect::default());
+        app.hit.viz.set(Rect::default());
         return;
     }
 
@@ -58,7 +76,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     let [header, body, viz, now, foot] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(4),
-        Constraint::Length(spectrum_height(area.height, app.show_art)),
+        Constraint::Length(spectrum_height(area.height, app.show_art, app.viz_style)),
         Constraint::Length(4),
         Constraint::Length(1),
     ])
@@ -110,10 +128,10 @@ pub fn draw(f: &mut Frame, app: &App) {
             .as_ref()
             .and_then(|t| t.thumbnail.as_ref())
             .is_some();
-    let cover_w = cover::square_width(viz.height.saturating_sub(2)) + 2;
-    if show_cover && viz.width >= cover_w + 30 {
-        let [art, spec] =
-            Layout::horizontal([Constraint::Length(cover_w), Constraint::Min(28)]).areas(viz);
+    let art = show_cover.then(|| cover_area(viz)).flatten();
+    if let Some(art) = art {
+        let [_, spec] =
+            Layout::horizontal([Constraint::Length(art.width), Constraint::Min(28)]).areas(viz);
         draw_cover(f, app, art);
         draw_spectrum(f, app, spec);
     } else {
@@ -130,6 +148,42 @@ pub fn draw(f: &mut Frame, app: &App) {
         draw_modal(f, app, area);
     }
     draw_suggestions(f, app, header);
+}
+
+/// Where the cover pane goes inside the visualiser band, or `None` when there
+/// is no room for one worth drawing.
+///
+/// The picture is square, so both dimensions constrain it: the band's height
+/// caps it, and so does the width once the spectrum has been left enough room
+/// to mean anything. Whichever binds, the *other* side is derived from it -
+/// letting the pane keep the band's full height and stretching the art to fill
+/// it is exactly the bug this replaces.
+fn cover_area(viz: Rect) -> Option<Rect> {
+    /// Columns the spectrum needs beside the cover before a cover is worth it.
+    const SPECTRUM_MIN: u16 = 30;
+    /// Below this a cover is a smudge, and the spectrum is better off with the
+    /// whole band.
+    const COVER_MIN_ROWS: u16 = 4;
+
+    let mut rows = viz.height.saturating_sub(2);
+    let mut cols = cover::square_width(rows);
+    let budget = viz.width.saturating_sub(2 + SPECTRUM_MIN);
+    if cols > budget {
+        cols = budget;
+        rows = cover::square_height(cols);
+    }
+    if rows < COVER_MIN_ROWS || cols < COVER_MIN_ROWS {
+        return None;
+    }
+    // Centre the square vertically: unless the height was the binding
+    // constraint it is shorter than the band.
+    let height = (rows + 2).min(viz.height);
+    Some(Rect {
+        x: viz.x,
+        y: viz.y + (viz.height - height) / 2,
+        width: cols + 2,
+        height,
+    })
 }
 
 /// Centred overlay box of the given size.
@@ -279,20 +333,29 @@ fn draw_modal(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// The visualiser band gets more height when the cover is showing, because the
-/// cover is square: its width is twice this, so a short band makes a postage
-/// stamp.
-fn spectrum_height(total: u16, with_art: bool) -> u16 {
+/// cover is square: its width follows from this, so a short band makes a
+/// postage stamp.
+fn spectrum_height(total: u16, with_art: bool, style: VizStyle) -> u16 {
     let base = match total {
         0..=18 => 4,
         19..=28 => 6,
         29..=40 => 9,
         _ => (total / 4).min(14),
     };
-    if with_art {
+    let height = if with_art {
         (total / 3).clamp(base, 18)
     } else {
         base
+    };
+    // The chroma strip is twelve rows of information, one per pitch class,
+    // plus a border. It still works in less - two classes share a cell - but
+    // the note names have nowhere to go, and without them a row of colour says
+    // nothing about which note it is. So ask for the room when the terminal
+    // has it to spare, and never take more than half the screen for it.
+    if style == VizStyle::Chroma {
+        return height.max((N_CHROMA as u16 + 2).min(total / 2));
     }
+    height
 }
 
 fn block<'a>(app: &App, title: String, focused: bool) -> Block<'a> {
@@ -643,7 +706,13 @@ fn draw_cover(f: &mut Frame, app: &App, area: Rect) {
 
     if cover::is_graphics(app.art_backend) {
         // Written after the frame as a raw escape; keep the cells clear.
-        cover::reserve(inner, f.buffer_mut());
+        let painted = app
+            .hit
+            .painted
+            .borrow()
+            .as_ref()
+            .is_some_and(|(_, at)| *at == inner);
+        cover::reserve(inner, f.buffer_mut(), painted);
         return;
     }
     if app.art_cells.is_empty() {
@@ -676,9 +745,20 @@ fn draw_spectrum(f: &mut Frame, app: &App, area: Rect) {
     }
     let inner = b.inner(area);
     f.render_widget(b, area);
+    app.hit.viz.set(inner);
     let step: u16 = if inner.width >= 60 { 2 } else { 1 };
     let bands = (inner.width / step).max(1);
     app.n_bands.store(bands as u64, Ordering::Relaxed);
+    // A pixel style is real pixels where the terminal has a graphics protocol,
+    // so it is written after the frame; keep the cells clear for it.
+    if app.viz_style.is_pixel() && cover::is_graphics(app.art_backend) {
+        cover::reserve(
+            inner,
+            f.buffer_mut(),
+            app.hit.viz_painted.get() == Some(inner),
+        );
+        return;
+    }
     f.render_widget(
         Spectrum {
             frame: &frame,
@@ -686,6 +766,8 @@ fn draw_spectrum(f: &mut Frame, app: &App, area: Rect) {
             theme: &app.theme,
             step,
             history: &app.history,
+            chroma: &app.chroma,
+            pixels: &app.pixel_cells,
         },
         inner,
     );
@@ -950,4 +1032,74 @@ fn fit(s: &str, w: usize) -> String {
     let t = truncate(s, w);
     let pad = w.saturating_sub(t.width());
     t + &" ".repeat(pad)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The cover is a picture of a square, so the pane it goes in has to be a
+    /// square on screen. Getting this wrong is what stretched the art: the
+    /// pane took the band's full height and whatever width was left.
+    #[test]
+    fn the_cover_pane_is_square_on_screen() {
+        let cell = ytm_art::cell_px();
+        for width in [40u16, 60, 90, 140, 200] {
+            for height in [6u16, 10, 14, 18] {
+                let viz = Rect::new(0, 0, width, height);
+                let Some(area) = cover_area(viz) else {
+                    continue;
+                };
+                assert!(
+                    area.height <= viz.height,
+                    "{width}x{height}: taller than the band"
+                );
+                assert!(
+                    area.width + 28 <= viz.width,
+                    "{width}x{height}: no room for the spectrum"
+                );
+
+                let px_w = (area.width - 2) as f32 * cell.w as f32;
+                let px_h = (area.height - 2) as f32 * cell.h as f32;
+                let ratio = px_w / px_h;
+                assert!(
+                    (0.85..=1.18).contains(&ratio),
+                    "{width}x{height}: cover pane is {px_w}x{px_h} px, ratio {ratio}"
+                );
+            }
+        }
+    }
+
+    /// The chroma strip is unreadable without its note names, and the names
+    /// need a row per class, so the band has to grow for it where it can.
+    #[test]
+    fn the_chroma_strip_gets_room_for_its_labels() {
+        for total in [30u16, 40, 60] {
+            for with_art in [false, true] {
+                let h = spectrum_height(total, with_art, VizStyle::Chroma);
+                assert!(
+                    h - 2 >= N_CHROMA as u16,
+                    "{total} rows, art {with_art}: chroma got {h}, too short to label"
+                );
+                assert!(h <= total / 2, "{total} rows: chroma took {h}");
+            }
+        }
+        // Not at the expense of a terminal that has no room to give.
+        let cramped = spectrum_height(16, false, VizStyle::Chroma);
+        assert!(cramped <= 8, "a 16-row terminal gave the strip {cramped}");
+    }
+
+    /// A band too short, or too narrow once the spectrum has its share, is
+    /// better off with no cover than with a smudge.
+    #[test]
+    fn a_cover_with_no_room_is_dropped() {
+        assert!(
+            cover_area(Rect::new(0, 0, 200, 4)).is_none(),
+            "band too short"
+        );
+        assert!(
+            cover_area(Rect::new(0, 0, 34, 18)).is_none(),
+            "band too narrow"
+        );
+    }
 }

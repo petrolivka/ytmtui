@@ -93,7 +93,10 @@ impl Quality {
 #[serde(default, deny_unknown_fields)]
 pub struct Visualizer {
     pub enabled: bool,
-    /// bars | mirrored | scope
+    /// bars | mirrored | scope | spectrogram | chroma | fire | ink
+    ///
+    /// scope, fire and ink are drawn as pixels: real ones through sixel or the
+    /// Kitty protocol, half blocks anywhere else.
     pub style: String,
     /// Load-bearing, not cosmetic: uncapped rendering roughly doubles CPU for
     /// no visible gain.
@@ -121,6 +124,14 @@ pub struct Art {
     /// "auto" picks by terminal; half blocks work everywhere, including
     /// terminals with no graphics protocol at all.
     pub backend: String,
+    /// Cell height divided by cell width, or 0 to measure it.
+    ///
+    /// The cover is square, and how many columns that takes depends on the
+    /// shape of a cell. That is normally measured, but a terminal is free not
+    /// to report it - tmux never does - and the 8x16 assumed instead is wrong
+    /// for plenty of fonts. Set this if the cover still comes out stretched:
+    /// wider than tall means the number is too low.
+    pub cell_aspect: f32,
 }
 
 impl Default for Art {
@@ -128,6 +139,7 @@ impl Default for Art {
         Self {
             enabled: true,
             backend: "auto".into(),
+            cell_aspect: 0.0,
         }
     }
 }

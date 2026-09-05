@@ -84,6 +84,13 @@ pub struct Hitboxes {
     /// Inner area of the cover pane, for fetching at the right size and for
     /// positioning graphics escapes.
     pub cover: Cell<Rect>,
+    /// Inner area of the visualiser pane. The fire needs it to size its
+    /// simulation, and to position its own graphics escapes.
+    pub viz: Cell<Rect>,
+    /// Where the fire was last painted through a graphics protocol, so it can
+    /// be wiped when the style changes. Ratatui will not do it: those cells
+    /// were marked skipped, so its diff has no record of anything being there.
+    pub viz_painted: Cell<Option<Rect>>,
     /// What the graphics backend last painted, so an unchanged image is not
     /// re-encoded and re-sent every frame. At 60 fps that is a lot of bytes
     /// down a terminal, and it flickers over a slow link.
@@ -153,9 +160,19 @@ pub struct App {
     pub spectrum: Arc<ArcSwap<SpectrumFrame>>,
     /// Rolling band history for the spectrogram, newest last.
     pub history: std::collections::VecDeque<Vec<f32>>,
+    /// Rolling pitch-class history for the chroma strip, newest last.
+    pub chroma: std::collections::VecDeque<[f32; ytm_viz::N_CHROMA]>,
+    /// The pixel visualisers, live only while one of those styles is on.
+    pub pixels: crate::pixel::Pixels,
+    /// The current pixel frame as half-block cells, for terminals without a
+    /// graphics protocol. Empty when the graphics path is drawing it instead.
+    pub pixel_cells: Vec<Vec<ytm_art::Cell>>,
     /// Fades after an onset, so the accent pulses rather than flickers.
     pub beat_glow: f32,
     last_seq: u64,
+    /// When the last pixel frame was rendered. The ink advects by time rather
+    /// than by frame, so it flows at the same speed whatever the frame rate.
+    pixel_at: Instant,
     pub n_bands: Arc<AtomicU64>,
 
     pub now: TrackState,
@@ -191,6 +208,7 @@ impl App {
 
         let cfg = loaded.config;
         let style = VizStyle::parse(&cfg.visualizer.style);
+        ytm_art::set_cell_aspect(cfg.art.cell_aspect);
         let mut app = Self {
             hit: Hitboxes::default(),
             lists: ListStates::default(),
@@ -233,8 +251,12 @@ impl App {
             lyrics_scroll: 0,
             lyrics_loading: false,
             history: std::collections::VecDeque::with_capacity(512),
+            chroma: std::collections::VecDeque::with_capacity(512),
+            pixels: crate::pixel::Pixels::new(),
+            pixel_cells: Vec::new(),
             beat_glow: 0.0,
             last_seq: 0,
+            pixel_at: Instant::now(),
             spectrum,
             n_bands,
             now: TrackState::default(),
@@ -567,6 +589,7 @@ impl App {
         let c = self.hit.cover.get();
         self.ensure_art(c.width, c.height);
         self.sample_spectrum();
+        self.step_pixels();
         self.poll_scrobble();
         self.poll_config();
         self.poll_suggestions();
@@ -1016,6 +1039,38 @@ impl App {
         });
     }
 
+    /// Render one frame of whichever pixel visualiser is showing.
+    ///
+    /// Driven from the tick rather than from the widget because two of the
+    /// three are simulations with state, not functions of the current spectrum
+    /// frame - and because on a graphics terminal nothing is drawn into the
+    /// ratatui buffer at all.
+    fn step_pixels(&mut self) {
+        let area = self.hit.viz.get();
+        if !self.viz_style.is_pixel() || area.width == 0 || area.height == 0 {
+            self.pixels.clear();
+            self.pixel_cells = Vec::new();
+            return;
+        }
+        let graphics = crate::cover::is_graphics(self.art_backend);
+        let frame = self.spectrum.load_full();
+        let dt = self.pixel_at.elapsed().as_secs_f32().clamp(1e-3, 0.1);
+        self.pixel_at = Instant::now();
+        self.pixels.step(
+            self.viz_style,
+            viz_pixels(self.viz_style, graphics, area),
+            &frame,
+            self.beat_glow,
+            dt,
+            &self.theme,
+        );
+        if !graphics {
+            if let Some(img) = self.pixels.image() {
+                self.pixel_cells = ytm_art::to_half_blocks(img, area.width, area.height);
+            }
+        }
+    }
+
     /// Take one column of history per rendered frame, and decay the beat glow.
     fn sample_spectrum(&mut self) {
         let f = self.spectrum.load();
@@ -1029,6 +1084,10 @@ impl App {
             while self.history.len() > 512 {
                 self.history.pop_front();
             }
+        }
+        self.chroma.push_back(f.chroma);
+        while self.chroma.len() > 512 {
+            self.chroma.pop_front();
         }
         if f.beat {
             self.beat_glow = self.beat_glow.max(0.35 + f.beat_strength * 0.65);
@@ -1051,6 +1110,7 @@ impl App {
         self.config_mtime = now;
         let loaded = ytm_config::load();
         self.theme = Theme::from_config(&loaded.config);
+        ytm_art::set_cell_aspect(loaded.config.art.cell_aspect);
         self.keymap = loaded.keymap;
         self.autoplay = loaded.config.general.autoplay;
         self.config = loaded.config;
@@ -1681,6 +1741,32 @@ impl App {
 fn config_mtime() -> Option<std::time::SystemTime> {
     let p = ytm_config::config_path()?;
     std::fs::metadata(p).ok()?.modified().ok()
+}
+
+/// Pixels a style draws into for a pane of `area` cells.
+///
+/// Half blocks give exactly two pixels per cell, so the picture is drawn
+/// one-to-one and never resampled - which matters most for the scope, whose
+/// one-pixel trace would be filtered away by a downscale.
+///
+/// With a graphics backend the width is capped, and by how much depends on
+/// what the style is. The simulations want a *low* resolution: a full pane of
+/// doom fire is a large simulation and a lot of bytes down a pty sixty times a
+/// second, and chunky pixels are the look anyway. The scope wants the
+/// opposite, because resolution is the entire reason it draws pixels at all,
+/// and drawing a line costs nothing whatever the size.
+fn viz_pixels(style: VizStyle, graphics: bool, area: Rect) -> (usize, usize) {
+    if !graphics {
+        return (area.width as usize, area.height as usize * 2);
+    }
+    let max_w = if style == VizStyle::Scope { 1600 } else { 360 };
+    let cell = ytm_art::cell_px();
+    let w = area.width as usize * cell.w as usize;
+    let h = area.height as usize * cell.h as usize;
+    if w <= max_w {
+        return (w.max(1), h.max(1));
+    }
+    (max_w, (h * max_w / w).max(1))
 }
 
 /// The analyser thread. Rebuilds itself when the terminal width changes the

@@ -53,19 +53,28 @@ impl Theme {
 
     /// Amplitude (0..1) to colour, interpolating across the gradient stops.
     pub fn grad(&self, t: f32) -> Color {
+        let (r, g, b) = self.grad_rgb(t);
+        Color::Rgb(r, g, b)
+    }
+
+    /// The same, as components. The fire visualiser builds a palette rather
+    /// than styling cells, so it needs the numbers, not a `Color`.
+    pub fn grad_rgb(&self, t: f32) -> (u8, u8, u8) {
         let n = self.spectrum.len();
         if n == 0 {
-            return self.accent;
+            return match self.accent {
+                Color::Rgb(r, g, b) => (r, g, b),
+                _ => (0xff, 0x33, 0x3a),
+            };
         }
         if n == 1 {
-            let (r, g, b) = self.spectrum[0];
-            return Color::Rgb(r, g, b);
+            return self.spectrum[0];
         }
         let t = t.clamp(0.0, 1.0) * (n - 1) as f32;
         let i = (t.floor() as usize).min(n - 2);
         let k = t - i as f32;
         let (a, b) = (self.spectrum[i], self.spectrum[i + 1]);
         let lerp = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k) as u8;
-        Color::Rgb(lerp(a.0, b.0), lerp(a.1, b.1), lerp(a.2, b.2))
+        (lerp(a.0, b.0), lerp(a.1, b.1), lerp(a.2, b.2))
     }
 }

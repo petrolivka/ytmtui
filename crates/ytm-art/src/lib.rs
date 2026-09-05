@@ -9,8 +9,9 @@ pub mod sixel;
 
 use anyhow::{Context, Result};
 use image::imageops::FilterType;
-use image::RgbImage;
+pub use image::RgbImage;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -72,6 +73,97 @@ impl Backend {
     }
 }
 
+/// The pixel size of one terminal cell.
+///
+/// Every drawing decision here needs it: "square" means an equal number of
+/// pixels each way, but an image is placed in *cells*. Assuming the classic
+/// 8x16 - exactly twice as tall as wide - is what made covers come out
+/// stretched under any font whose cells are not 2:1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CellPx {
+    pub w: u16,
+    pub h: u16,
+}
+
+/// What to assume when the terminal will not say. The historical VGA cell, and
+/// what this code used to hard-code everywhere.
+pub const DEFAULT_CELL: CellPx = CellPx { w: 8, h: 16 };
+
+impl CellPx {
+    /// Columns per row for a square image: `cols = rows * aspect`.
+    pub fn aspect(self) -> f32 {
+        self.h as f32 / self.w as f32
+    }
+}
+
+/// A configured cell aspect, as raw `f32` bits; zero means "measure".
+///
+/// A process-wide setting rather than a parameter because every drawing path
+/// needs it and none of them otherwise carries the config. It is written once
+/// at startup and again on a config reload.
+static ASPECT_OVERRIDE: AtomicU32 = AtomicU32::new(0);
+
+/// Override the measured cell shape. A value outside the plausible range - 0
+/// included - restores measurement.
+pub fn set_cell_aspect(aspect: f32) {
+    ASPECT_OVERRIDE.store(aspect.to_bits(), Ordering::Relaxed);
+}
+
+fn aspect_override() -> Option<f32> {
+    let a = f32::from_bits(ASPECT_OVERRIDE.load(Ordering::Relaxed));
+    (a.is_finite() && (1.2..=4.0).contains(&a)).then_some(a)
+}
+
+/// Measure the terminal's cell size from the kernel's window size.
+///
+/// `ws_xpixel`/`ws_ypixel` are zero under tmux and in a few terminals, and
+/// some report values that cannot be right; in either case there is nothing
+/// better to do than fall back to 8x16. Cheap enough (one ioctl) to call per
+/// frame, which keeps it correct across a font-size change.
+pub fn cell_px() -> CellPx {
+    let measured = measure_cell();
+    match aspect_override() {
+        // Keep the measured width: only the shape was disputed, and the width
+        // is what a sixel image is scaled against.
+        Some(a) => CellPx {
+            w: measured.w,
+            h: ((measured.w as f32 * a).round() as u16).max(2),
+        },
+        None => measured,
+    }
+}
+
+fn measure_cell() -> CellPx {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+        let fd = std::io::stdout().as_raw_fd();
+        if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws) } == 0
+            && ws.ws_col > 0
+            && ws.ws_row > 0
+            && ws.ws_xpixel > 0
+            && ws.ws_ypixel > 0
+        {
+            let cell = CellPx {
+                w: ws.ws_xpixel / ws.ws_col,
+                h: ws.ws_ypixel / ws.ws_row,
+            };
+            if plausible(cell) {
+                return cell;
+            }
+        }
+    }
+    DEFAULT_CELL
+}
+
+/// Reject nonsense rather than trust it: a terminal reporting a cell 1px wide,
+/// or one wider than it is tall, is reporting something other than a cell, and
+/// believing it would distort every image far worse than the 8x16 guess.
+fn plausible(c: CellPx) -> bool {
+    c.w >= 2 && c.h >= 2 && (1.2..=4.0).contains(&c.aspect())
+}
+
 /// One cell of a half-block rendering: the upper and lower pixel colours.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cell {
@@ -81,9 +173,10 @@ pub struct Cell {
 
 /// Render to a grid of `rows` x `cols` half-block cells.
 ///
-/// A terminal cell is about twice as tall as it is wide, so splitting it in
-/// half vertically gives roughly square pixels: `cols` x `2*rows` of them.
-/// That is why a square cover wants twice as many columns as rows.
+/// Splitting a cell vertically gives a pixel grid of `cols` x `2*rows`, whose
+/// pixels are only square when the cell is exactly 2:1. The image is simply
+/// stretched into that grid; keeping it undistorted on screen is the caller's
+/// job, by choosing `cols` and `rows` from [`cell_px`].
 pub fn to_half_blocks(img: &RgbImage, cols: u16, rows: u16) -> Vec<Vec<Cell>> {
     if cols == 0 || rows == 0 {
         return Vec::new();
@@ -107,15 +200,23 @@ pub fn to_half_blocks(img: &RgbImage, cols: u16, rows: u16) -> Vec<Vec<Cell>> {
 
 /// Scale an image to the pixel size a cell grid covers.
 ///
-/// Assumes the common 8x16 cell; sixel does not know about cells, so this is
-/// how a sixel image is made to land inside a pane.
+/// Sixel does not know about cells, so this is how a sixel image is made to
+/// land inside a pane - which means it has to use the terminal's real cell
+/// size, not a guess.
 pub fn resize_for_cells(img: &RgbImage, cols: u16, rows: u16) -> RgbImage {
+    let cell = cell_px();
     image::imageops::resize(
         img,
-        (cols as u32 * 8).max(1),
-        (rows as u32 * 16).max(1),
+        (cols as u32 * cell.w as u32).max(1),
+        (rows as u32 * cell.h as u32).max(1),
         FilterType::Triangle,
     )
+}
+
+/// Nearest-neighbour scale. Used for the fire visualiser, where the simulation
+/// runs at a deliberately low resolution and chunky pixels are the look.
+pub fn scale_nearest(img: &RgbImage, w: u32, h: u32) -> RgbImage {
+    image::imageops::resize(img, w.max(1), h.max(1), FilterType::Nearest)
 }
 
 /// The image id used for the cover.
@@ -123,21 +224,58 @@ pub fn resize_for_cells(img: &RgbImage, cols: u16, rows: u16) -> RgbImage {
 /// Fixed rather than terminal-assigned so the placement can be deleted again:
 /// unlike sixel, a Kitty placement is an object that survives the text being
 /// redrawn over it, and stays until it is explicitly removed.
-const COVER_IMAGE_ID: u32 = 7714;
+pub const COVER_IMAGE_ID: u32 = 7714;
+/// The visualiser's own id, so deleting one image never disturbs the other.
+pub const VIZ_IMAGE_ID: u32 = 7715;
 
-/// Remove the cover image and its placements.
+/// Remove an image and its placements.
 ///
-/// Needed whenever the cover stops being shown - fullscreen, a dialogue, art
+/// Needed whenever a picture stops being shown - fullscreen, a dialogue, art
 /// turned off - because redrawing the screen does not erase it.
-pub fn kitty_delete() -> String {
-    format!("\x1b_Ga=d,d=I,i={COVER_IMAGE_ID},q=2\x1b\\")
+pub fn kitty_delete(id: u32) -> String {
+    format!("\x1b_Ga=d,d=I,i={id},q=2\x1b\\")
+}
+
+/// Placement id for the visualiser.
+///
+/// Naming the placement is what makes an animation possible: transmitting
+/// under the same image *and* placement id replaces what is on screen in one
+/// step. Deleting first and re-transmitting leaves a gap every frame in which
+/// the cells underneath show through.
+const VIZ_PLACEMENT_ID: u32 = 1;
+
+/// Kitty graphics protocol, raw RGB rather than PNG.
+///
+/// For the fire visualiser, which sends a new image every frame: PNG
+/// compression costs milliseconds per frame and buys nothing, because the
+/// image is deliberately small and Kitty scales it up to `cols` x `rows`.
+pub fn to_kitty_rgb(img: &RgbImage, cols: u16, rows: u16) -> String {
+    use base64::Engine;
+    let (w, h) = img.dimensions();
+    let b64 = base64::engine::general_purpose::STANDARD.encode(img.as_raw());
+    let mut out = String::with_capacity(b64.len() + 256);
+    let mut chunks = b64.as_bytes().chunks(4096).peekable();
+    let mut first = true;
+    while let Some(chunk) = chunks.next() {
+        let more = if chunks.peek().is_some() { 1 } else { 0 };
+        let payload = std::str::from_utf8(chunk).unwrap_or_default();
+        if first {
+            out.push_str(&format!(
+                "\x1b_Ga=T,f=24,s={w},v={h},i={VIZ_IMAGE_ID},p={VIZ_PLACEMENT_ID},\
+                 c={cols},r={rows},m={more},q=2;{payload}\x1b\\"
+            ));
+            first = false;
+        } else {
+            out.push_str(&format!("\x1b_Gm={more},q=2;{payload}\x1b\\"));
+        }
+    }
+    out
 }
 
 /// Kitty graphics protocol: a base64 PNG delivered in chunks.
 pub fn to_kitty(img: &RgbImage, cols: u16, rows: u16) -> Result<String> {
     use base64::Engine;
-    let scaled =
-        image::imageops::resize(img, cols as u32 * 8, rows as u32 * 16, FilterType::Triangle);
+    let scaled = resize_for_cells(img, cols, rows);
     let mut png = Vec::new();
     image::codecs::png::PngEncoder::new(&mut png)
         .write_image(
@@ -315,13 +453,74 @@ mod tests {
         );
         assert!(seq.contains("q=2"), "responses are not suppressed");
 
-        let del = kitty_delete();
+        let del = kitty_delete(COVER_IMAGE_ID);
         assert!(del.contains("a=d"), "not a delete command");
         assert!(
             del.contains(&format!("i={COVER_IMAGE_ID}")),
             "delete targets no id"
         );
         assert!(del.starts_with("\x1b_G") && del.ends_with("\x1b\\"));
+    }
+
+    /// A bad cell measurement distorts every image, so anything implausible
+    /// has to fall back rather than be believed.
+    #[test]
+    fn implausible_cell_sizes_are_rejected() {
+        assert!(plausible(DEFAULT_CELL));
+        assert!(plausible(CellPx { w: 9, h: 21 }));
+        assert!(!plausible(CellPx { w: 1, h: 16 }), "1px-wide cell");
+        assert!(!plausible(CellPx { w: 16, h: 8 }), "wider than tall");
+        assert!(!plausible(CellPx { w: 4, h: 40 }), "ten times taller");
+        assert!((DEFAULT_CELL.aspect() - 2.0).abs() < 1e-6);
+        // Whatever the environment, the measurement itself must be usable.
+        assert!(plausible(cell_px()));
+    }
+
+    /// The escape hatch for terminals that will not report a cell size. It has
+    /// to actually take effect, and nonsense has to fall back to measuring.
+    #[test]
+    fn a_configured_aspect_overrides_the_measurement() {
+        let measured = cell_px();
+        set_cell_aspect(2.5);
+        let forced = cell_px();
+        assert_eq!(forced.w, measured.w, "the width should not move");
+        assert!(
+            (forced.aspect() - 2.5).abs() < 0.1,
+            "got {}",
+            forced.aspect()
+        );
+
+        set_cell_aspect(0.0);
+        assert_eq!(cell_px(), measured, "zero should restore measurement");
+        set_cell_aspect(f32::NAN);
+        assert_eq!(cell_px(), measured, "nonsense should restore measurement");
+        set_cell_aspect(0.0);
+    }
+
+    /// The visualiser sends a frame every tick, so the transmit has to replace
+    /// what is on screen by itself. Without a placement id the only way to
+    /// replace it is to delete first, and the gap that leaves is visible.
+    #[test]
+    fn the_animated_transmit_replaces_its_own_placement() {
+        let img = RgbImage::from_pixel(4, 6, Rgb([9, 9, 9]));
+        let seq = to_kitty_rgb(&img, 2, 1);
+        assert!(seq.starts_with("\x1b_G") && seq.ends_with("\x1b\\"));
+        assert!(seq.contains(&format!("i={VIZ_IMAGE_ID}")), "no image id");
+        assert!(
+            seq.contains(&format!("p={VIZ_PLACEMENT_ID}")),
+            "no placement id, so each frame would need a delete first"
+        );
+        assert!(seq.contains("f=24"), "not raw RGB");
+        assert!(seq.contains("s=4,v=6"), "wrong source size");
+        assert!(seq.contains("c=2,r=1"), "not placed in the pane");
+        // A stray newline or space in the control block is a protocol error.
+        let controls = &seq[..seq.find(';').expect("no payload separator")];
+        assert!(
+            !controls.contains(' ') && !controls.contains('\n'),
+            "whitespace in the control block: {controls:?}"
+        );
+        // The visualiser and the cover must never delete each other.
+        assert_ne!(VIZ_IMAGE_ID, COVER_IMAGE_ID);
     }
 
     #[test]

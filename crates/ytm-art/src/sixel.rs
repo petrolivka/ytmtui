@@ -57,35 +57,50 @@ pub fn encode(img: &RgbImage) -> String {
     }
 
     // Sixels cover six pixel rows at a time.
+    //
+    // One pass over the band's pixels rather than one pass per palette entry:
+    // the visualiser re-encodes a full pane every frame, and scanning all 256
+    // entries per band made that cost proportional to the palette instead of
+    // to the picture.
+    let mut slot_of = [usize::MAX; 256];
+    let mut slot_colour: Vec<u8> = Vec::new();
+    let mut slots: Vec<u8> = Vec::new();
+    let stride = w as usize;
+
     for band in 0..h.div_ceil(6) {
         let y0 = band * 6;
-        let mut first_colour_in_band = true;
-        for (ci, u) in used.iter().enumerate() {
-            if !*u {
-                continue;
+        // Clear only what was used, so resetting stays proportional to the
+        // colours actually in the previous band.
+        for c in slot_colour.drain(..) {
+            slot_of[c as usize] = usize::MAX;
+        }
+        slots.clear();
+
+        for dy in 0..6u32 {
+            let y = y0 + dy;
+            if y >= h {
+                break;
             }
-            // Build this colour's row of sixels, then run-length encode it.
-            let mut row: Vec<u8> = Vec::with_capacity(w as usize);
-            let mut any = false;
-            for x in 0..w {
-                let mut bits = 0u8;
-                for dy in 0..6 {
-                    let y = y0 + dy;
-                    if y < h && indexed[(y * w + x) as usize] as usize == ci {
-                        bits |= 1 << dy;
-                    }
+            let base = (y * w) as usize;
+            for x in 0..stride {
+                let c = indexed[base + x];
+                let mut slot = slot_of[c as usize];
+                if slot == usize::MAX {
+                    slot = slot_colour.len();
+                    slot_of[c as usize] = slot;
+                    slot_colour.push(c);
+                    slots.resize(slots.len() + stride, 0);
                 }
-                any |= bits != 0;
-                row.push(bits);
+                slots[slot * stride + x] |= 1 << dy;
             }
-            if !any {
-                continue;
-            }
-            if !first_colour_in_band {
+        }
+
+        for (slot, &ci) in slot_colour.iter().enumerate() {
+            if slot > 0 {
                 out.push('$'); // back to the start of the band
             }
-            first_colour_in_band = false;
             let _ = write!(out, "#{ci}");
+            let row = &slots[slot * stride..(slot + 1) * stride];
             let mut i = 0usize;
             while i < row.len() {
                 let v = row[i];
@@ -138,6 +153,24 @@ mod tests {
         let (r, g, b) = palette_rgb(i);
         assert!(r == g && g == b);
         assert!((r as i32 - 128).abs() < 12, "grey {r} is far from 128");
+    }
+
+    /// Every colour in a band has to be emitted, each from the start of the
+    /// band. Dropping one - or forgetting the carriage return between them -
+    /// loses part of the picture.
+    #[test]
+    fn each_colour_in_a_band_gets_its_own_pass() {
+        // Left half red, right half blue, one band tall.
+        let mut img = solid(8, 6, [255, 0, 0]);
+        for y in 0..6 {
+            for x in 4..8 {
+                img.put_pixel(x, y, Rgb([0, 0, 255]));
+            }
+        }
+        let s = encode(&img);
+        assert!(s.contains("#180"), "red missing");
+        assert!(s.contains("#5"), "blue missing");
+        assert_eq!(s.matches('$').count(), 1, "expected one carriage return");
     }
 
     #[test]

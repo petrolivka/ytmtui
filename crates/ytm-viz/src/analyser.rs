@@ -18,12 +18,35 @@ const GAMMA: f32 = 1.4;
 /// Gentle high-frequency lift, in dB per octave, compensating music's natural
 /// roll-off so the top of the spectrum stays legible.
 const TILT_DB_PER_OCT: f32 = 1.0;
+/// Hard floor for the waveform's own gain ceiling, in sample units (about
+/// -34 dBFS). Same reasoning as `AGC_FLOOR`: without it, silence drives the
+/// ceiling to zero and the oscilloscope amplifies the noise floor into a wall.
+const WAVE_AGC_FLOOR: f32 = 0.02;
 /// Hard floor for the automatic-gain ceiling, in raw magnitude units.
 ///
 /// Without it, silence drives the ceiling toward zero and the normalisation
 /// amplifies the noise floor: with playback paused the bars visibly *climb*
 /// instead of resting at zero.
 const AGC_FLOOR: f32 = 1.0;
+/// Pitch classes in an octave. Named rather than bare 12s because the chroma
+/// arrays, the folding and the display all have to agree on it.
+pub const N_CHROMA: usize = 12;
+/// Range folded into pitch classes: A1 to roughly C8.
+///
+/// Below A1 the bins are too coarse to tell one semitone from the next, and
+/// above C8 there is little but the partials of everything lower, which blur
+/// the classes rather than sharpen them.
+const CHROMA_LO: f32 = 55.0;
+const CHROMA_HI: f32 = 4200.0;
+/// How loud the strongest pitch class must be, against the gain ceiling,
+/// before the fold is believed rather than zeroed.
+const CHROMA_GATE: f32 = 0.02;
+/// How loud a spectral peak must be, against the same ceiling, to be counted
+/// as a note rather than as noise between the notes.
+const CHROMA_PEAK_GATE: f32 = 0.01;
+/// Time constant for the chroma ease, in seconds. Long, because harmony
+/// changes over a bar and a per-frame chroma is a flickering mess.
+const CHROMA_EASE: f32 = 0.12;
 /// Frames of spectral flux kept for the adaptive onset threshold - about a
 /// second at 60 fps, which is long enough to span a bar at most tempos.
 const FLUX_HISTORY: usize = 64;
@@ -45,6 +68,21 @@ pub struct SpectrumFrame {
     /// How far the spectral flux exceeded its recent average, 0..=1. Drives
     /// the strength of an accent rather than just its presence.
     pub beat_strength: f32,
+    /// Energy per pitch class, C first, each 0..=1 and scaled so the
+    /// strongest class in the frame is 1.0.
+    ///
+    /// Harmony rather than energy: every C in the mix folds into one number,
+    /// whatever octave it was played in. Relative by design - what matters is
+    /// which notes are sounding, not how loud the passage is.
+    pub chroma: [f32; N_CHROMA],
+    /// The most recent mono samples, oldest first, normalised to about
+    /// -1.0..=1.0 by a slow ceiling of their own.
+    ///
+    /// The time domain, which the bands cannot reconstruct: an oscilloscope
+    /// wants the waveform, not a symmetrical drawing of the spectrum. Scaled
+    /// here rather than at the point of drawing so that a quiet passage still
+    /// fills the trace without a loud one flattening against the edges.
+    pub wave: Vec<f32>,
 }
 
 pub struct Analyser {
@@ -57,11 +95,18 @@ pub struct Analyser {
     band_ranges: Vec<(usize, usize)>,
     /// Per-band tilt gain, precomputed in dB.
     tilt_db: Vec<f32>,
+    /// Bin magnitudes for the current frame. Computed once and shared by the
+    /// gain ceiling, the bands and the chroma fold, which between them would
+    /// otherwise take the same square root of the same bin five times.
+    mags: Vec<f32>,
+    chroma: [f32; N_CHROMA],
     bands: Vec<f32>,
     peaks: Vec<f32>,
     peak_age: Vec<f32>,
     /// Slow rolling ceiling so quiet tracks still fill the display.
     agc: f32,
+    /// The same, in the time domain, for the published waveform.
+    wave_agc: f32,
     /// Previous frame's band values, for spectral flux.
     prev: Vec<f32>,
     /// Recent flux values, for the adaptive onset threshold.
@@ -122,10 +167,13 @@ impl Analyser {
             scratch_out,
             band_ranges,
             tilt_db,
+            mags: vec![0.0; nyquist_bin + 1],
+            chroma: [0.0; N_CHROMA],
             bands: vec![0.0; n_bands],
             peaks: vec![0.0; n_bands],
             peak_age: vec![0.0; n_bands],
             agc: 1e-4,
+            wave_agc: WAVE_AGC_FLOOR,
             prev: vec![0.0; n_bands],
             flux_history: vec![0.0; FLUX_HISTORY],
             flux_pos: 0,
@@ -211,12 +259,22 @@ impl Analyser {
         // RMS for the level meter / silence detection.
         let rms = (self.history.iter().map(|s| s * s).sum::<f32>() / FFT_SIZE as f32).sqrt();
 
+        // The waveform gets its own ceiling: the spectrum's is in magnitude
+        // units after the FFT, which says nothing about sample amplitude.
+        let wave_peak = self.history.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        if wave_peak > self.wave_agc {
+            self.wave_agc = wave_peak; // instant attack
+        } else {
+            self.wave_agc += (wave_peak - self.wave_agc) * (1.0 - (-dt / 2.0).exp());
+        }
+        let wave_gain = 1.0 / self.wave_agc.max(WAVE_AGC_FLOOR);
+
+        for (m, c) in self.mags.iter_mut().zip(self.scratch_out.iter()) {
+            *m = c.norm();
+        }
+
         // Track a slow ceiling for automatic gain.
-        let frame_max = self
-            .scratch_out
-            .iter()
-            .map(|c| c.norm())
-            .fold(0.0f32, f32::max);
+        let frame_max = self.mags.iter().fold(0.0f32, |m, &v| m.max(v));
         if frame_max > self.agc {
             self.agc = frame_max; // instant attack
         } else {
@@ -233,7 +291,7 @@ impl Analyser {
             // Peak within the band reads better than the mean for music.
             let mut m = 0.0f32;
             for b in b0..b1 {
-                m = m.max(self.scratch_out[b].norm());
+                m = m.max(self.mags[b]);
             }
             let db = 20.0 * (m / ceiling).max(1e-9).log10() + self.tilt_db[i];
             let lin = ((db - DB_FLOOR) / -DB_FLOOR).clamp(0.0, 1.0);
@@ -266,6 +324,8 @@ impl Analyser {
                 }
             }
         }
+
+        self.fold_chroma(dt, ceiling);
 
         // Onset detection by spectral flux: the sum of increases across bands.
         // Only rises count - energy falling away is not an attack.
@@ -301,6 +361,65 @@ impl Analyser {
             seq: self.seq,
             beat,
             beat_strength,
+            chroma: self.chroma,
+            wave: self
+                .history
+                .iter()
+                .map(|s| (s * wave_gain).clamp(-1.0, 1.0))
+                .collect(),
+        }
+    }
+
+    /// Fold the spectrum into pitch classes.
+    ///
+    /// Every note folds into one of twelve numbers whatever octave it was
+    /// played in, so what comes out is which notes are sounding rather than
+    /// where the energy is. Scaled against the loudest class rather than an
+    /// absolute level: a quiet passage has a key too.
+    ///
+    /// It works from interpolated *peaks*, not from bins. Assigning each bin
+    /// to the class nearest its centre frequency cannot work at this
+    /// resolution: bins are 23 Hz apart at 48 kHz, a semitone at A3 is 13 Hz
+    /// wide, and a 220 Hz tone lands between two bins that round to G# and A#
+    /// with nothing on A at all. Fitting a parabola to each local maximum
+    /// recovers the true frequency to a fraction of a bin, which is accurate
+    /// enough at any pitch and ignores the noise floor between the notes as a
+    /// bonus.
+    fn fold_chroma(&mut self, dt: f32, ceiling: f32) {
+        let mut raw = [0.0f32; N_CHROMA];
+        let bin_hz = self.sample_rate / FFT_SIZE as f32;
+        let floor = ceiling * CHROMA_PEAK_GATE;
+        for k in 1..self.mags.len() - 1 {
+            let (a, b, c) = (self.mags[k - 1], self.mags[k], self.mags[k + 1]);
+            if b < floor || b <= a || b < c {
+                continue; // not a peak
+            }
+            let denom = a - 2.0 * b + c;
+            let delta = if denom.abs() > f32::EPSILON {
+                (0.5 * (a - c) / denom).clamp(-0.5, 0.5)
+            } else {
+                0.0
+            };
+            let f = (k as f32 + delta) * bin_hz;
+            if !(CHROMA_LO..=CHROMA_HI).contains(&f) {
+                continue;
+            }
+            // MIDI 69 is A440 and MIDI 60 is a C, so a MIDI number modulo
+            // twelve is already a pitch class counted from C.
+            let midi = 69.0 + N_CHROMA as f32 * (f / 440.0).log2();
+            let class = (midi.round() as i32).rem_euclid(N_CHROMA as i32) as usize;
+            raw[class] += b;
+        }
+        let loudest = raw.iter().fold(0.0f32, |m, &v| m.max(v));
+        // A silent frame has a loudest class too, and normalising against it
+        // would show a confident chord made of nothing but noise.
+        let quiet = loudest < self.agc.max(AGC_FLOOR) * CHROMA_GATE;
+        // Ease towards the new values: chroma is a property of the harmony,
+        // which changes over a bar, not over a frame.
+        let ease = 1.0 - (-dt / CHROMA_EASE).exp();
+        for (out, &v) in self.chroma.iter_mut().zip(raw.iter()) {
+            let target = if quiet { 0.0 } else { v / loudest };
+            *out += (target - *out) * ease;
         }
     }
 
@@ -382,6 +501,118 @@ mod tests {
         a.feed_interleaved(&loud_noise(1024), 2);
         let p = peak(&a.analyse(1.0 / 60.0));
         assert!(p > 0.3, "expected activity, got peak {p}");
+    }
+
+    /// A tone at a known pitch has to land in that pitch's class, in whatever
+    /// octave it is played - that is the whole point of folding.
+    #[test]
+    fn chroma_finds_the_note_being_played() {
+        // A4 = 440 Hz, and A is nine semitones above C.
+        const A: usize = 9;
+        for (label, hz) in [("A3", 220.0), ("A4", 440.0), ("A5", 880.0)] {
+            let mut an = Analyser::new(32, 48_000);
+            let tone: Vec<f32> = (0..FFT_SIZE * 2)
+                .map(|i| {
+                    let t = (i / 2) as f32 / 48_000.0;
+                    (std::f32::consts::TAU * hz * t).sin() * 0.5
+                })
+                .collect();
+            for _ in 0..80 {
+                an.feed_interleaved(&tone, 2);
+                an.analyse(1.0 / 60.0);
+            }
+            let c = an.analyse(1.0 / 60.0).chroma;
+            let winner = c
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .map(|(i, _)| i)
+                .unwrap();
+            assert_eq!(winner, A, "{label} folded to class {winner}, not A: {c:?}");
+        }
+    }
+
+    /// The point of a chroma strip is reading harmony, so a triad has to show
+    /// as three classes and not as a smear across all twelve.
+    #[test]
+    fn chroma_reads_a_chord() {
+        // C major, one octave up from middle C: C5, E5, G5.
+        const C: usize = 0;
+        const E: usize = 4;
+        const G: usize = 7;
+        let mut an = Analyser::new(32, 48_000);
+        let tone: Vec<f32> = (0..FFT_SIZE * 2)
+            .map(|i| {
+                let t = (i / 2) as f32 / 48_000.0;
+                let mut v = 0.0;
+                for hz in [523.25, 659.26, 783.99] {
+                    v += (std::f32::consts::TAU * hz * t).sin() * 0.3;
+                }
+                v
+            })
+            .collect();
+        for _ in 0..80 {
+            an.feed_interleaved(&tone, 2);
+            an.analyse(1.0 / 60.0);
+        }
+        let c = an.analyse(1.0 / 60.0).chroma;
+        for (name, class) in [("C", C), ("E", E), ("G", G)] {
+            assert!(c[class] > 0.5, "{name} is quiet in the chord: {c:?}");
+        }
+        let played = [C, E, G];
+        let loudest_other = (0..N_CHROMA)
+            .filter(|i| !played.contains(i))
+            .fold(0.0f32, |m, i| m.max(c[i]));
+        assert!(
+            loudest_other < 0.3,
+            "a note outside the chord reached {loudest_other}: {c:?}"
+        );
+    }
+
+    /// Chroma is normalised against the loudest class, so without a gate
+    /// silence would show a confident chord made of nothing but noise.
+    #[test]
+    fn silence_has_no_chroma() {
+        let mut an = warmed();
+        for _ in 0..400 {
+            an.analyse(1.0 / 60.0);
+        }
+        let c = an.analyse(1.0 / 60.0).chroma;
+        assert!(
+            c.iter().all(|&v| v < 0.05),
+            "silence produced a chroma: {c:?}"
+        );
+    }
+
+    /// The scope draws the waveform, so the waveform has to be published - and
+    /// scaled, or a quiet track is a flat line and a loud one is a solid block.
+    #[test]
+    fn the_waveform_is_published_and_normalised() {
+        let mut a = warmed();
+        a.feed_interleaved(&loud_noise(1024), 2);
+        let f = a.analyse(1.0 / 60.0);
+        assert_eq!(f.wave.len(), FFT_SIZE);
+        let peak = f.wave.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        assert!(peak > 0.5, "waveform barely moves: peak {peak}");
+        assert!(peak <= 1.0, "waveform escapes its range: peak {peak}");
+
+        // A signal 20 dB quieter must still fill the trace, not shrink to a
+        // line: that is the whole point of giving it its own ceiling.
+        let mut b = Analyser::new(32, 48_000);
+        for _ in 0..400 {
+            let quiet: Vec<f32> = loud_noise(1024).iter().map(|s| s * 0.1).collect();
+            b.feed_interleaved(&quiet, 2);
+            b.analyse(1.0 / 60.0);
+        }
+        let quiet_peak = b
+            .analyse(1.0 / 60.0)
+            .wave
+            .iter()
+            .fold(0.0f32, |m, s| m.max(s.abs()));
+        assert!(
+            quiet_peak > 0.5,
+            "quiet track drew a flat line: {quiet_peak}"
+        );
     }
 
     /// The paused-playback regression. When playback pauses the tap goes quiet,

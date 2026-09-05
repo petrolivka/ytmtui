@@ -10,3 +10,4 @@ reqwest.workspace = true
 tracing.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 base64 = "0.22"
+libc.workspace = true
