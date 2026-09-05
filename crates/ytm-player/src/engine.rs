@@ -158,6 +158,13 @@ fn trim_heap() {}
 /// free lists on every keypress for no benefit.
 const TRIM_INTERVAL: Duration = Duration::from_secs(30);
 
+/// How long a decoder error stays in the status bar.
+///
+/// It used to stay until the next `start`, which a gapless handover never
+/// calls - so one bad moment on one track sat in the status bar for the rest
+/// of the session, over songs that played perfectly.
+const ERROR_LINGER: Duration = Duration::from_secs(10);
+
 struct Engine {
     _device: rodio::MixerDeviceSink,
     /// Two players on one mixer. Crossfading needs both playing at once, which
@@ -193,6 +200,8 @@ struct Engine {
     /// Guards against reading `player.empty()` before the source is running.
     started: Option<Instant>,
     error: Option<String>,
+    /// When `error` was raised, so it can expire instead of sticking.
+    error_at: Option<Instant>,
     rng: u64,
     /// When the heap was last trimmed, so a burst of skips does not.
     last_trim: Instant,
@@ -233,6 +242,7 @@ impl Engine {
             arming: None,
             started: None,
             error: None,
+            error_at: None,
             rng: 0x2545F4914F6CDD1D,
             last_trim: Instant::now(),
         })
@@ -522,6 +532,7 @@ impl Engine {
                 self.fading = None;
                 self.started = Some(Instant::now());
                 self.prefetch_next();
+                self.clear_error();
                 self.maybe_trim();
             }
             return;
@@ -622,7 +633,7 @@ impl Engine {
         self.cancel_fade();
         self.player().clear();
         self.started = None;
-        self.error = None;
+        self.clear_error();
 
         let Some(track) = self.queue.get(self.index).cloned() else {
             self.state = PlayState::Stopped;
@@ -635,7 +646,7 @@ impl Engine {
         let fmt = match self.resolver.resolve(&track.id) {
             Ok(f) => f,
             Err(e) => {
-                self.error = Some(format!("resolve failed: {e}"));
+                self.raise(format!("resolve failed: {e}"));
                 self.state = PlayState::Stopped;
                 return;
             }
@@ -661,7 +672,7 @@ impl Engine {
                 self.maybe_trim();
             }
             Err(e) => {
-                self.error = Some(format!("decode failed: {e}"));
+                self.raise(format!("decode failed: {e}"));
                 self.state = PlayState::Stopped;
             }
         }
@@ -713,6 +724,9 @@ impl Engine {
                 self.armed = None;
                 self.started = Some(Instant::now());
                 self.prefetch_next();
+                // A new track is a clean slate; whatever the last one said
+                // about itself does not apply to this one.
+                self.clear_error();
                 // rodio has dropped the finished source, so its ring buffer is
                 // free and can go back to the OS.
                 self.maybe_trim();
@@ -730,11 +744,27 @@ impl Engine {
     }
 
     fn drain_decoder_errors(&mut self) {
-        let mut g = self.errors.lock().unwrap();
-        if let Some(last) = g.last() {
-            self.error = Some(format!("ffmpeg: {last}"));
+        let latest = {
+            let mut g = self.errors.lock().unwrap();
+            let latest = g.last().cloned();
+            g.clear();
+            latest
+        };
+        if let Some(last) = latest {
+            self.raise(format!("ffmpeg: {last}"));
+        } else if self.error_at.is_some_and(|t| t.elapsed() >= ERROR_LINGER) {
+            self.clear_error();
         }
-        g.clear();
+    }
+
+    fn raise(&mut self, message: String) {
+        self.error = Some(message);
+        self.error_at = Some(Instant::now());
+    }
+
+    fn clear_error(&mut self) {
+        self.error = None;
+        self.error_at = None;
     }
 
     fn prefetch_next(&self) {

@@ -218,11 +218,17 @@ impl FfmpegPcm {
 
         let stdout = child.stdout.take().context("ffmpeg stdout missing")?;
 
-        // NFR-13: never discard a subprocess's stderr.
+        // NFR-13: never discard a subprocess's stderr. Everything ffmpeg says
+        // is logged; only what the listener can act on is passed on to the UI.
         if let Some(err) = child.stderr.take() {
             let log = errors.clone();
             std::thread::spawn(move || {
                 for line in BufReader::new(err).lines().map_while(Result::ok) {
+                    if is_recoverable(&line) {
+                        tracing::debug!(target: "ytm_player::ffmpeg", "{line}");
+                        continue;
+                    }
+                    tracing::warn!(target: "ytm_player::ffmpeg", "{line}");
                     let mut g = log.lock().unwrap();
                     g.push(line);
                     if g.len() > 32 {
@@ -374,6 +380,29 @@ impl Drop for FfmpegPcm {
     }
 }
 
+/// Is this ffmpeg stderr line something ffmpeg puts right by itself?
+///
+/// A network input is opened with `-reconnect`, so a dropped HTTP connection is
+/// part of the design rather than a failure: googlevideo resets a connection
+/// that has been trickling along at playback rate for a few minutes, and ffmpeg
+/// reopens it and carries on without a gap. Surfacing that as a player error
+/// put a red line in the status bar for something that never went wrong - and,
+/// because nothing cleared it, left it there for the rest of the session.
+///
+/// A stream that really does die still gets reported: the ring runs dry and
+/// `STARVE_TIMEOUT` ends the track.
+fn is_recoverable(line: &str) -> bool {
+    const TRANSIENT: [&str; 6] = [
+        "Connection reset by peer",
+        "Connection timed out",
+        "Will reconnect",
+        "Broken pipe",
+        "Operation timed out",
+        "Error in the pull function",
+    ];
+    TRANSIENT.iter().any(|t| line.contains(t))
+}
+
 fn is_network_input(input: &str) -> bool {
     let l = input.to_ascii_lowercase();
     l.starts_with("http://") || l.starts_with("https://")
@@ -381,7 +410,34 @@ fn is_network_input(input: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::Filters;
+    use super::{is_recoverable, Filters};
+
+    /// The reset that closed issue #3: googlevideo drops a connection that has
+    /// been trickling at playback rate, ffmpeg reconnects, and the listener
+    /// hears nothing at all. That is not something to put in the status bar.
+    #[test]
+    fn transient_network_chatter_is_not_a_player_error() {
+        for line in [
+            "[in#0/matroska,webm @ 0x5] IO error: Connection reset by peer",
+            "[https @ 0x1] Will reconnect at 123456 in 0 second(s), error=Connection reset by peer.",
+            "[tcp @ 0x2] Connection to tcp://rr3.googlevideo.com failed: Connection timed out",
+        ] {
+            assert!(is_recoverable(line), "should be swallowed: {line}");
+        }
+    }
+
+    /// ...but a stream that genuinely fails still has to reach the user.
+    #[test]
+    fn real_failures_still_reach_the_user() {
+        for line in [
+            "[in#0 @ 0x1] Error opening input: Server returned 403 Forbidden",
+            "Conversion failed!",
+            "Unknown decoder 'opus'",
+            "No such file or directory",
+        ] {
+            assert!(!is_recoverable(line), "should be reported: {line}");
+        }
+    }
 
     #[test]
     fn no_filters_means_no_argument() {
