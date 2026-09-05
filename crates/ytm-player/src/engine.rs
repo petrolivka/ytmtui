@@ -20,6 +20,9 @@ pub enum Command {
     Enqueue(Track),
     /// Append an autoplay continuation, and resume if the queue had run dry.
     AppendRadio(Vec<Track>),
+    /// Reinstate a saved queue, paused at `position`. Restoring a session
+    /// should put things back, not start making noise.
+    RestoreQueue { tracks: Vec<Track>, index: usize, position: f64 },
     PlayNext(Track),
     JumpTo(usize),
     RemoveAt(usize),
@@ -169,6 +172,16 @@ impl Engine {
             Command::PlayNext(t) => {
                 let at = (self.index + 1).min(self.queue.len());
                 self.queue.insert(at, t);
+            }
+            Command::RestoreQueue { tracks, index, position } => {
+                if tracks.is_empty() {
+                    return;
+                }
+                self.queue = tracks;
+                self.index = index.min(self.queue.len() - 1);
+                self.start(position);
+                self.player.pause();
+                self.state = PlayState::Paused;
             }
             Command::JumpTo(i) => {
                 if i < self.queue.len() {

@@ -429,6 +429,23 @@ impl Innertube {
         Ok(RowPage { title: page_title(&v), rows, continuation: parse::continuation(&v) })
     }
 
+    /// Lyrics for a track, if YouTube Music has any.
+    ///
+    /// Two hops: the watch-next response carries a Lyrics tab whose browse id
+    /// must then be fetched. A track with no lyrics yields `None` rather than
+    /// an error - "not available" is an ordinary outcome here, not a failure.
+    pub fn lyrics(&self, id: &VideoId) -> Result<Option<String>> {
+        let next = self.watch_next(id)?;
+        let Some(browse) = lyrics_browse_id(&next) else {
+            return Ok(None);
+        };
+        let v = self.get("browse", json!({ "browseId": browse }), TTL_ENTITY)?;
+        let text = json::find(&v, "description")
+            .and_then(json::text)
+            .filter(|t| !t.trim().is_empty());
+        Ok(text)
+    }
+
     /// Signed-in account name, if the response carries one.
     pub fn account_name(&self) -> Result<Option<String>> {
         let v = self.post("account/account_menu", json!({}))?;
@@ -512,6 +529,24 @@ impl Innertube {
         self.post("feedback", json!({ "feedbackTokens": [token] }))?;
         Ok(())
     }
+}
+
+/// The browse id of the Lyrics tab in a watch-next response.
+fn lyrics_browse_id(v: &Value) -> Option<String> {
+    let mut tabs = Vec::new();
+    json::find_all(v, "tabRenderer", &mut tabs);
+    for t in tabs {
+        let title = t.get("title").and_then(json::text).unwrap_or_default();
+        if title.eq_ignore_ascii_case("lyrics") {
+            if let Some(id) = json::find(t, "browseId").and_then(|b| b.as_str()) {
+                // An unavailable tab is present but has no target.
+                if !id.is_empty() {
+                    return Some(id.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// The artist credited in a page header, used to fill in album tracklists.

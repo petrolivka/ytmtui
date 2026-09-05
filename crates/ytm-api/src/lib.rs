@@ -20,6 +20,8 @@ pub trait MusicBackend: Send + Sync {
     fn explore(&self, section: ExploreSection) -> Result<RowPage>;
     /// Next page of a list, addressed by the token the previous page returned.
     fn continue_rows(&self, token: &str) -> Result<RowPage>;
+    /// Lyrics for a track, or None when YouTube Music has none.
+    fn lyrics(&self, id: &VideoId) -> Result<Option<String>>;
     fn artist(&self, id: &BrowseId) -> Result<RowPage>;
     fn album(&self, id: &BrowseId) -> Result<RowPage>;
     fn playlist(&self, id: &BrowseId) -> Result<RowPage>;
@@ -52,6 +54,9 @@ impl MusicBackend for Innertube {
     }
     fn continue_rows(&self, token: &str) -> Result<RowPage> {
         Innertube::continue_rows(self, token)
+    }
+    fn lyrics(&self, id: &VideoId) -> Result<Option<String>> {
+        Innertube::lyrics(self, id)
     }
     fn artist(&self, id: &BrowseId) -> Result<RowPage> {
         Innertube::artist(self, id)

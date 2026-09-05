@@ -54,6 +54,7 @@ pub enum AppEvent {
     Radio(Result<Vec<Track>, String>),
     RadioFrom(Track, Result<Vec<Track>, String>),
     TrackState(VideoId, TrackState),
+    Lyrics(VideoId, Result<Option<String>, String>),
     Toast(String),
 }
 
@@ -76,6 +77,12 @@ pub struct App {
     pub viz_style: VizStyle,
     pub viz_fullscreen: bool,
     pub show_help: bool,
+    pub show_lyrics: bool,
+    /// Lyrics for the track they belong to, so a stale fetch is never shown
+    /// against the wrong song.
+    pub lyrics: Option<(VideoId, Option<String>)>,
+    pub lyrics_scroll: u16,
+    pub lyrics_loading: bool,
     pub spectrum: Arc<ArcSwap<SpectrumFrame>>,
     pub n_bands: Arc<AtomicU64>,
 
@@ -131,6 +138,10 @@ impl App {
             viz_style: style,
             viz_fullscreen: false,
             show_help: false,
+            show_lyrics: false,
+            lyrics: None,
+            lyrics_scroll: 0,
+            lyrics_loading: false,
             spectrum,
             n_bands,
             now: TrackState::default(),
@@ -147,6 +158,7 @@ impl App {
             quit_flag,
         };
         app.go(View::Home);
+        app.restore_session();
         for w in loaded.warnings {
             app.toast(w);
         }
@@ -154,6 +166,42 @@ impl App {
             app.toast("anonymous mode - account features disabled".into());
         }
         app
+    }
+
+    /// Put back the queue and position from the previous run, paused (FR-C5).
+    fn restore_session(&mut self) {
+        if !self.config.general.restore_session {
+            return;
+        }
+        let Some(s) = crate::session::load() else { return };
+        if s.queue.is_empty() {
+            return;
+        }
+        let n = s.queue.len();
+        self.player.send(PCmd::SetVolume(if s.volume > 0.0 { s.volume } else { 1.0 }));
+        self.player.send(PCmd::RestoreQueue {
+            tracks: s.queue,
+            index: s.index,
+            position: s.position,
+        });
+        self.toast(format!("restored {n} tracks (paused)"));
+    }
+
+    fn save_session(&self) {
+        if !self.config.general.restore_session {
+            return;
+        }
+        let st = self.player.status();
+        crate::session::save(&crate::session::Session {
+            queue: st.queue.clone(),
+            index: st.queue_index,
+            position: st.position.as_secs_f64(),
+            volume: st.volume,
+            saved_at_unix: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        });
     }
 
     pub fn page(&self) -> Option<&Page> {
@@ -344,6 +392,16 @@ impl App {
                         self.now = st;
                     }
                 }
+                AppEvent::Lyrics(id, r) => {
+                    self.lyrics_loading = false;
+                    match r {
+                        Ok(text) => self.lyrics = Some((id, text)),
+                        Err(e) => {
+                            self.lyrics = Some((id, None));
+                            self.toast(format!("lyrics failed: {e}"));
+                        }
+                    }
+                }
                 AppEvent::Toast(m) => self.toast(m),
             }
         }
@@ -365,6 +423,11 @@ impl App {
         }
         self.prev_track = cur.clone();
         self.now = TrackState { id: cur.clone(), ..Default::default() };
+        self.lyrics = None;
+        self.lyrics_scroll = 0;
+        if self.show_lyrics {
+            self.fetch_lyrics();
+        }
         let Some(id) = cur else { return };
         if !self.backend.is_authenticated() {
             return;
@@ -378,6 +441,27 @@ impl App {
                     TrackState { id: Some(id), rating, in_library, token_add: add, token_remove: remove },
                 ));
             }
+        });
+    }
+
+    /// Fetch lyrics for whatever is playing, if the panel is open and we do
+    /// not already have them for that exact track.
+    fn fetch_lyrics(&mut self) {
+        let Some(track) = self.player.status().current.clone() else {
+            self.lyrics = None;
+            return;
+        };
+        if self.lyrics.as_ref().map(|(id, _)| id) == Some(&track.id) || self.lyrics_loading {
+            return;
+        }
+        self.lyrics_loading = true;
+        self.lyrics_scroll = 0;
+        let b = self.backend.clone();
+        let tx = self.tx.clone();
+        let id = track.id.clone();
+        std::thread::spawn(move || {
+            let r = b.lyrics(&id).map_err(|e| e.to_string());
+            let _ = tx.send(AppEvent::Lyrics(id, r));
         });
     }
 
@@ -531,6 +615,10 @@ impl App {
                 if let Some(p) = self.page_mut() {
                     p.move_sel(delta);
                 }
+            }
+            Focus::Queue if self.show_lyrics => {
+                let n = self.lyrics_scroll as isize + delta;
+                self.lyrics_scroll = n.max(0) as u16;
             }
             Focus::Queue => {
                 let len = self.player.status().queue.len();
@@ -698,7 +786,12 @@ impl App {
 
             CycleVisualizer => self.viz_style = self.viz_style.next(),
             ToggleVisualizerFullscreen => self.viz_fullscreen = !self.viz_fullscreen,
-            ToggleLyrics => self.toast("lyrics: not yet".into()),
+            ToggleLyrics => {
+                self.show_lyrics = !self.show_lyrics;
+                if self.show_lyrics {
+                    self.fetch_lyrics();
+                }
+            }
         }
     }
 
@@ -729,6 +822,7 @@ impl App {
     }
 
     pub fn shutdown(&self) {
+        self.save_session();
         self.quit_flag.store(true, Ordering::Relaxed);
         self.player.send(PCmd::Shutdown);
     }

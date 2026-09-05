@@ -70,12 +70,18 @@ pub fn draw(f: &mut Frame, app: &App) {
         .areas(body);
         draw_sidebar(f, app, left);
         draw_content(f, app, &status, mid);
-        draw_queue(f, app, &status, right);
+        if app.show_lyrics {
+            draw_lyrics(f, app, right);
+        } else {
+            draw_queue(f, app, &status, right);
+        }
     } else if area.width >= MEDIUM {
         let [left, mid] =
             Layout::horizontal([Constraint::Length(18), Constraint::Min(30)]).areas(body);
         draw_sidebar(f, app, left);
-        if app.focus == Focus::Queue {
+        if app.focus == Focus::Queue && app.show_lyrics {
+            draw_lyrics(f, app, mid);
+        } else if app.focus == Focus::Queue {
             draw_queue(f, app, &status, mid);
         } else {
             draw_content(f, app, &status, mid);
@@ -307,6 +313,28 @@ fn draw_queue(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect) {
     );
 }
 
+fn draw_lyrics(f: &mut Frame, app: &App, area: Rect) {
+    let focused = app.focus == Focus::Queue;
+    let b = block(app, "lyrics".into(), focused);
+    let inner = b.inner(area);
+    f.render_widget(b, area);
+
+    let (text, style) = match (&app.lyrics, app.lyrics_loading) {
+        (_, true) => ("loading\u{2026}".to_string(), app.theme.dim),
+        (Some((_, Some(t))), _) => (t.clone(), app.theme.fg),
+        // No lyrics is an ordinary outcome, not an error (FR-Y3).
+        (Some((_, None)), _) => ("no lyrics for this track".to_string(), app.theme.dim),
+        (None, _) => ("nothing playing".to_string(), app.theme.dim),
+    };
+    f.render_widget(
+        Paragraph::new(text)
+            .style(Style::default().fg(style))
+            .wrap(Wrap { trim: false })
+            .scroll((app.lyrics_scroll, 0)),
+        inner,
+    );
+}
+
 fn draw_spectrum(f: &mut Frame, app: &App, area: Rect) {
     let frame = app.spectrum.load_full();
     let b = block(
@@ -469,14 +497,14 @@ fn draw_help(f: &mut Frame, app: &App, area: Rect) {
         binds.sort_by_key(|b| (b.chars().count(), b.clone()));
         lines.push(Line::from(vec![
             Span::styled(
-                format!("  {:<14}", binds.join(" / ")),
+                format!("  {:<17}", binds.join(" / ")),
                 Style::default().fg(app.theme.accent).bold(),
             ),
             Span::styled(a.label().to_string(), Style::default().fg(app.theme.fg)),
         ]));
     }
 
-    let w = 74.min(area.width.saturating_sub(4));
+    let w = 78.min(area.width.saturating_sub(4));
     let h = (lines.len() as u16 + 2).min(area.height.saturating_sub(2));
     let r = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,

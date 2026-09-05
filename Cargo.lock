@@ -3526,6 +3526,8 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "ratatui",
+ "serde",
+ "serde_json",
  "unicode-width",
  "ytm-api",
  "ytm-config",

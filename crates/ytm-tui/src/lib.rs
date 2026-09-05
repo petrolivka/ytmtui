@@ -4,6 +4,7 @@ pub mod app;
 pub mod clipboard;
 pub mod keymap;
 pub mod nav;
+pub mod session;
 pub mod spectrum;
 pub mod theme;
 pub mod ui;

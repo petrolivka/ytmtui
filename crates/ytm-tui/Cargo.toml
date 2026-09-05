@@ -14,3 +14,5 @@ anyhow.workspace = true
 ratatui.workspace = true
 arc-swap.workspace = true
 unicode-width = "0.2"
+serde.workspace = true
+serde_json.workspace = true

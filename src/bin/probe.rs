@@ -151,6 +151,16 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    println!("\n== lyrics ==");
+    for id in ["sWcLccMuCA8", "EnjOz4wtS8Q"] {
+        let vid = ytm_core::VideoId(id.into());
+        match yt.lyrics(&vid) {
+            Ok(Some(t)) => println!("   {id}: {} chars \u{2014} {:?}\u{2026}", t.len(), trunc(&t.replace('\n', " / "), 70)),
+            Ok(None) => println!("   {id}: no lyrics available"),
+            Err(e) => println!("   {id}: FAILED: {e}"),
+        }
+    }
+
     probe_candidates(&yt);
     Ok(())
 }
