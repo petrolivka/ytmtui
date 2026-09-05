@@ -6,6 +6,9 @@ use anyhow::Result;
 use arc_swap::ArcSwap;
 use rodio::{DeviceSinkBuilder, Player};
 use std::sync::mpsc::{self, Receiver, Sender};
+
+/// A decoder opened ahead of time, with the queue index it belongs to.
+type ArmResult = Result<(usize, FfmpegPcm, Progress), String>;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use ytm_core::{PlayState, PlayerStatus, RepeatMode, Track};
@@ -97,6 +100,10 @@ struct Engine {
     shuffle: bool,
     volume: f32,
     progress: Progress,
+    /// The decoder for the *next* track, opened early and queued behind the
+    /// current one so the handover has no gap (FR-P5).
+    armed: Option<(usize, Progress)>,
+    arming: Option<Receiver<ArmResult>>,
     /// Guards against reading `player.empty()` before the source is running.
     started: Option<Instant>,
     error: Option<String>,
@@ -126,6 +133,8 @@ impl Engine {
             shuffle: false,
             volume: 1.0,
             progress: Progress::default(),
+            armed: None,
+            arming: None,
             started: None,
             error: None,
             rng: 0x2545F4914F6CDD1D,
@@ -143,6 +152,7 @@ impl Engine {
                     Err(mpsc::TryRecvError::Disconnected) => return,
                 }
             }
+            self.poll_gapless();
             self.poll_track_end();
             self.drain_decoder_errors();
             self.publish();
@@ -157,7 +167,14 @@ impl Engine {
                 self.index = index.min(self.queue.len().saturating_sub(1));
                 self.start(0.0);
             }
-            Command::Enqueue(t) => self.queue.push(t),
+            Command::Enqueue(t) => {
+                let was_last = self.index + 1 >= self.queue.len();
+                self.queue.push(t);
+                // Appending only changes what plays next if nothing followed.
+                if was_last {
+                    self.disarm_and_correct();
+                }
+            }
             Command::AppendRadio(tracks) => {
                 if tracks.is_empty() {
                     return;
@@ -172,6 +189,8 @@ impl Engine {
             Command::PlayNext(t) => {
                 let at = (self.index + 1).min(self.queue.len());
                 self.queue.insert(at, t);
+                // The armed decoder is for whatever used to be next.
+                self.disarm_and_correct();
             }
             Command::RestoreQueue { tracks, index, position } => {
                 if tracks.is_empty() {
@@ -191,6 +210,9 @@ impl Engine {
             }
             Command::RemoveAt(i) => {
                 if i < self.queue.len() {
+                    if i == self.index + 1 {
+                        self.disarm_and_correct();
+                    }
                     self.queue.remove(i);
                     if i < self.index {
                         self.index -= 1;
@@ -245,20 +267,106 @@ impl Engine {
                 self.volume = v.clamp(0.0, 1.5);
                 self.player.set_volume(self.volume);
             }
-            Command::CycleRepeat => self.repeat = self.repeat.next(),
+            Command::CycleRepeat => {
+                self.repeat = self.repeat.next();
+                if self.repeat == RepeatMode::One {
+                    self.disarm_and_correct();
+                }
+            }
             Command::ToggleShuffle => {
                 self.shuffle = !self.shuffle;
                 if self.shuffle {
                     self.shuffle_tail();
                 }
+                self.disarm_and_correct();
             }
             Command::Stop => self.stop(),
             Command::Shutdown => {}
         }
     }
 
+    /// Prepare the next track and queue it behind the current one, so playback
+    /// runs straight on rather than pausing to spawn a decoder.
+    ///
+    /// rodio plays queued sources back to back, so the handover costs nothing;
+    /// the gap in the naive version is entirely the ffmpeg spawn and prebuffer,
+    /// which this moves off the critical path.
+    fn poll_gapless(&mut self) {
+        // Collect a decoder that finished opening.
+        if let Some(rx) = &self.arming {
+            match rx.try_recv() {
+                Ok(Ok((index, src, progress))) => {
+                    self.arming = None;
+                    // Still valid? A skip or seek may have moved on meanwhile.
+                    if self.state == PlayState::Playing && self.index + 1 == index {
+                        self.player.append(src);
+                        self.armed = Some((index, progress));
+                    }
+                }
+                Ok(Err(_)) => self.arming = None,
+                Err(mpsc::TryRecvError::Disconnected) => self.arming = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+
+        if self.armed.is_some() || self.arming.is_some() || self.state != PlayState::Playing {
+            return;
+        }
+        // Repeat-one replays the same source; queueing the next would be wrong.
+        if self.repeat == RepeatMode::One {
+            return;
+        }
+        let Some(remaining) = self.remaining_secs() else { return };
+        if remaining > 12.0 {
+            return;
+        }
+        let next_index = self.index + 1;
+        let Some(track) = self.queue.get(next_index).cloned() else { return };
+
+        let (tx, rx) = mpsc::channel();
+        self.arming = Some(rx);
+        let resolver = self.resolver.clone();
+        let sink = self.sink.clone();
+        let errors = self.errors.clone();
+        std::thread::spawn(move || {
+            let progress = Progress::default();
+            let r = resolver.resolve(&track.id).and_then(|fmt| {
+                FfmpegPcm::open(&fmt.url, 0.0, sink, progress.clone(), errors)
+                    .map(|src| (next_index, src, progress))
+            });
+            let _ = tx.send(r.map_err(|e| e.to_string()));
+        });
+    }
+
+    fn remaining_secs(&self) -> Option<f64> {
+        let total = self.current_duration()?;
+        Some((total - self.progress.seconds()).max(0.0))
+    }
+
+    /// Throw away a queued next decoder, e.g. after a skip or a seek.
+    fn disarm(&mut self) {
+        self.armed = None;
+        self.arming = None;
+    }
+
+    /// Invalidate a queued next decoder when what comes next has changed.
+    ///
+    /// rodio can only clear the whole queue, not one entry behind the playing
+    /// source, so if a decoder is already queued the current track has to be
+    /// restarted at its position. That only happens inside the last few
+    /// seconds of a track, where these actions are rare.
+    fn disarm_and_correct(&mut self) {
+        let was_armed = self.armed.is_some();
+        self.disarm();
+        if was_armed && self.state == PlayState::Playing {
+            let at = self.progress.seconds();
+            self.start(at);
+        }
+    }
+
     /// Begin (or restart) the current track at `from` seconds.
     fn start(&mut self, from: f64) {
+        self.disarm();
         self.player.clear();
         self.started = None;
         self.error = None;
@@ -311,6 +419,7 @@ impl Engine {
     /// Move to the next track. `manual` distinguishes a keypress from a track
     /// ending naturally, which matters for repeat-one.
     fn advance(&mut self, manual: bool) {
+        self.disarm();
         if !manual && self.repeat == RepeatMode::One {
             self.start(0.0);
             return;
@@ -328,6 +437,18 @@ impl Engine {
 
     fn poll_track_end(&mut self) {
         if self.state != PlayState::Playing {
+            return;
+        }
+        // A queued next source means rodio handles the handover itself; the
+        // queue length dropping back to one is how we learn it happened.
+        if let Some((index, progress)) = self.armed.clone() {
+            if self.player.len() <= 1 {
+                self.index = index;
+                self.progress = progress;
+                self.armed = None;
+                self.started = Some(Instant::now());
+                self.prefetch_next();
+            }
             return;
         }
         // Ignore `empty()` briefly after start: the source is not yet running.
