@@ -7,8 +7,9 @@
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
+use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ytm_core::{BrowseId, PlaylistId, Rating, Row, Track, VideoId};
 
@@ -147,11 +148,34 @@ const TTL_ENTITY: Duration = Duration::from_secs(24 * 60 * 60);
 /// player-shaped pattern; bursts are not.
 const MIN_REQUEST_SPACING: Duration = Duration::from_millis(120);
 
+/// How many parsed responses to keep. Small entries, so this is about not
+/// growing without limit rather than about saving much.
+const CACHE_CAPACITY: usize = 64;
+
+/// One cached, already-parsed response.
+///
+/// Parsed, not raw. An InnerTube response is hundreds of kilobytes of JSON,
+/// and holding one as a `serde_json::Value` costs about twenty times its wire
+/// size - measured, not guessed. All the app ever wants out of one is a page
+/// of rows, so that is what is kept and the `Value` is dropped as soon as it
+/// has been parsed.
+struct Entry {
+    at: Instant,
+    ttl: Duration,
+    value: Arc<dyn Any + Send + Sync>,
+}
+
+impl Entry {
+    fn is_stale(&self) -> bool {
+        self.at.elapsed() >= self.ttl
+    }
+}
+
 pub struct Innertube {
     http: reqwest::blocking::Client,
     /// None when running anonymously; search still works.
     auth: Option<Auth>,
-    cache: Mutex<HashMap<String, (Instant, Value)>>,
+    cache: Mutex<HashMap<String, Entry>>,
     last_request: Mutex<Option<Instant>>,
 }
 
@@ -215,18 +239,49 @@ impl Innertube {
     }
 
     /// Cached read. Writes and per-track lookups deliberately bypass this.
-    fn get(&self, endpoint: &str, body: Value, ttl: Duration) -> Result<Value> {
-        let key = format!("{endpoint}|{body}");
-        if let Some((at, v)) = self.cache.lock().unwrap().get(&key) {
-            if at.elapsed() < ttl {
-                return Ok(v.clone());
+    ///
+    /// `fetch` runs only on a miss, and what it returns - the *parsed* result,
+    /// not the response it was parsed from - is what gets stored.
+    ///
+    /// `key` must identify the parsed type as well as the request: two callers
+    /// can post the same body and want different things out of the answer, and
+    /// a collision between them would thrash rather than cache.
+    fn cached<T, F>(&self, key: String, ttl: Duration, fetch: F) -> Result<T>
+    where
+        T: Clone + Send + Sync + 'static,
+        F: FnOnce() -> Result<T>,
+    {
+        if let Some(e) = self.cache.lock().unwrap().get(&key) {
+            if !e.is_stale() {
+                if let Some(v) = e.value.downcast_ref::<T>() {
+                    return Ok(v.clone());
+                }
             }
         }
-        let v = self.post(endpoint, body)?;
-        self.cache
-            .lock()
-            .unwrap()
-            .insert(key, (Instant::now(), v.clone()));
+        let v = fetch()?;
+        let mut c = self.cache.lock().unwrap();
+        // Expiry is not eviction: an entry nobody looks at again would sit
+        // there for the life of the process, so sweep on the way past.
+        c.retain(|k, e| k == &key || !e.is_stale());
+        while c.len() >= CACHE_CAPACITY {
+            let Some(oldest) = c
+                .iter()
+                .filter(|(k, _)| *k != &key)
+                .min_by_key(|(_, e)| e.at)
+                .map(|(k, _)| k.clone())
+            else {
+                break;
+            };
+            c.remove(&oldest);
+        }
+        c.insert(
+            key,
+            Entry {
+                at: Instant::now(),
+                ttl,
+                value: Arc::new(v.clone()),
+            },
+        );
         Ok(v)
     }
 
@@ -295,25 +350,22 @@ impl Innertube {
 
     /// Search one results tab. Works anonymously.
     pub fn search(&self, query: &str, filter: SearchFilter) -> Result<RowPage> {
-        let v = self.get(
-            "search",
-            json!({ "query": query, "params": filter.params() }),
-            TTL_SEARCH,
-        )?;
-        let rows = parse::page_rows(&v);
-        if !rows.is_empty() {
-            return Ok(RowPage {
-                title: None,
-                rows,
-                continuation: parse::continuation(&v),
-            });
+        let page = self.search_body(json!({ "query": query, "params": filter.params() }))?;
+        if !page.rows.is_empty() {
+            return Ok(page);
         }
         // The filter blob may have gone stale; unfiltered beats empty.
-        let v = self.get("search", json!({ "query": query }), TTL_SEARCH)?;
-        Ok(RowPage {
-            title: None,
-            rows: parse::page_rows(&v),
-            continuation: parse::continuation(&v),
+        self.search_body(json!({ "query": query }))
+    }
+
+    fn search_body(&self, body: Value) -> Result<RowPage> {
+        self.cached(format!("search|{body}"), TTL_SEARCH, || {
+            let v = self.post("search", body.clone())?;
+            Ok(RowPage {
+                title: None,
+                rows: parse::page_rows(&v),
+                continuation: parse::continuation(&v),
+            })
         })
     }
 
@@ -338,15 +390,18 @@ impl Innertube {
     /// Fetch the next page of a list. Returns the rows and the token for the
     /// page after, if any.
     pub fn continue_rows(&self, token: &str) -> Result<RowPage> {
-        let v = self.get("browse", json!({ "continuation": token }), TTL_LIBRARY)?;
-        let mut rows = parse::page_rows(&v);
-        if rows.is_empty() {
-            rows = parse::flat_rows(&v);
-        }
-        Ok(RowPage {
-            title: None,
-            rows,
-            continuation: parse::continuation(&v),
+        let body = json!({ "continuation": token });
+        self.cached(format!("browse|{body}"), TTL_LIBRARY, || {
+            let v = self.post("browse", body.clone())?;
+            let mut rows = parse::page_rows(&v);
+            if rows.is_empty() {
+                rows = parse::flat_rows(&v);
+            }
+            Ok(RowPage {
+                title: None,
+                rows,
+                continuation: parse::continuation(&v),
+            })
         })
     }
 
@@ -367,15 +422,18 @@ impl Innertube {
     }
 
     fn browse_page(&self, browse_id: &str, ttl: Duration) -> Result<RowPage> {
-        let v = self.get("browse", json!({ "browseId": browse_id }), ttl)?;
-        let mut rows = parse::page_rows(&v);
-        if rows.is_empty() {
-            rows = parse::flat_rows(&v);
-        }
-        Ok(RowPage {
-            title: page_title(&v),
-            rows,
-            continuation: parse::continuation(&v),
+        let body = json!({ "browseId": browse_id });
+        self.cached(format!("browse|{body}"), ttl, || {
+            let v = self.post("browse", body.clone())?;
+            let mut rows = parse::page_rows(&v);
+            if rows.is_empty() {
+                rows = parse::flat_rows(&v);
+            }
+            Ok(RowPage {
+                title: page_title(&v),
+                rows,
+                continuation: parse::continuation(&v),
+            })
         })
     }
 
@@ -405,39 +463,45 @@ impl Innertube {
 
     /// An artist page: top songs, albums, singles.
     pub fn artist(&self, id: &BrowseId) -> Result<RowPage> {
-        let v = self.get("browse", json!({ "browseId": id.0 }), TTL_ENTITY)?;
-        Ok(RowPage {
-            title: page_title(&v),
-            rows: parse::page_rows(&v),
-            continuation: parse::continuation(&v),
+        let body = json!({ "browseId": id.0 });
+        self.cached(format!("artist|{body}"), TTL_ENTITY, || {
+            let v = self.post("browse", body.clone())?;
+            Ok(RowPage {
+                title: page_title(&v),
+                rows: parse::page_rows(&v),
+                continuation: parse::continuation(&v),
+            })
         })
     }
 
     /// An album page: its tracklist.
     pub fn album(&self, id: &BrowseId) -> Result<RowPage> {
-        let v = self.get("browse", json!({ "browseId": id.0 }), TTL_ENTITY)?;
-        let mut rows = parse::flat_rows(&v);
-        if rows.is_empty() {
-            rows = parse::page_rows(&v);
-        }
-        // An album tracklist omits the artist on every row, since it is the
-        // same throughout; take it from the header so rows are not blank.
-        if let Some(artist) = page_artist(&v) {
-            for r in rows.iter_mut() {
-                if let Row::Track(t) = r {
-                    if t.artist.trim().is_empty() {
-                        t.artist = artist.clone();
-                    }
-                    if t.album.is_none() {
-                        t.album = page_title(&v);
+        let body = json!({ "browseId": id.0 });
+        self.cached(format!("album|{body}"), TTL_ENTITY, || {
+            let v = self.post("browse", body.clone())?;
+            let mut rows = parse::flat_rows(&v);
+            if rows.is_empty() {
+                rows = parse::page_rows(&v);
+            }
+            // An album tracklist omits the artist on every row, since it is the
+            // same throughout; take it from the header so rows are not blank.
+            if let Some(artist) = page_artist(&v) {
+                for r in rows.iter_mut() {
+                    if let Row::Track(t) = r {
+                        if t.artist.trim().is_empty() {
+                            t.artist = artist.clone();
+                        }
+                        if t.album.is_none() {
+                            t.album = page_title(&v);
+                        }
                     }
                 }
             }
-        }
-        Ok(RowPage {
-            title: page_title(&v),
-            rows,
-            continuation: parse::continuation(&v),
+            Ok(RowPage {
+                title: page_title(&v),
+                rows,
+                continuation: parse::continuation(&v),
+            })
         })
     }
 
@@ -449,15 +513,18 @@ impl Innertube {
         } else {
             format!("VL{}", id.0)
         };
-        let v = self.get("browse", json!({ "browseId": browse }), TTL_LIBRARY)?;
-        let mut rows = parse::flat_rows(&v);
-        if rows.is_empty() {
-            rows = parse::page_rows(&v);
-        }
-        Ok(RowPage {
-            title: page_title(&v),
-            rows,
-            continuation: parse::continuation(&v),
+        let body = json!({ "browseId": browse });
+        self.cached(format!("playlist|{body}"), TTL_LIBRARY, || {
+            let v = self.post("browse", body.clone())?;
+            let mut rows = parse::flat_rows(&v);
+            if rows.is_empty() {
+                rows = parse::page_rows(&v);
+            }
+            Ok(RowPage {
+                title: page_title(&v),
+                rows,
+                continuation: parse::continuation(&v),
+            })
         })
     }
 
@@ -477,23 +544,22 @@ impl Innertube {
         if input.trim().is_empty() {
             return Ok(Vec::new());
         }
-        let v = self.get(
-            "music/get_search_suggestions",
-            json!({ "input": input }),
-            TTL_SEARCH,
-        )?;
-        let mut out = Vec::new();
-        let mut items = Vec::new();
-        json::find_all(&v, "searchSuggestionRenderer", &mut items);
-        for it in items {
-            if let Some(t) = it.get("suggestion").and_then(json::text) {
-                if !t.trim().is_empty() && !out.contains(&t) {
-                    out.push(t);
+        let body = json!({ "input": input });
+        self.cached(format!("suggest|{body}"), TTL_SEARCH, || {
+            let v = self.post("music/get_search_suggestions", body.clone())?;
+            let mut out = Vec::new();
+            let mut items = Vec::new();
+            json::find_all(&v, "searchSuggestionRenderer", &mut items);
+            for it in items {
+                if let Some(t) = it.get("suggestion").and_then(json::text) {
+                    if !t.trim().is_empty() && !out.contains(&t) {
+                        out.push(t);
+                    }
                 }
             }
-        }
-        out.truncate(8);
-        Ok(out)
+            out.truncate(8);
+            Ok(out)
+        })
     }
 
     /// Lyrics for a track, if YouTube Music has any.
@@ -506,11 +572,13 @@ impl Innertube {
         let Some(browse) = lyrics_browse_id(&next) else {
             return Ok(None);
         };
-        let v = self.get("browse", json!({ "browseId": browse }), TTL_ENTITY)?;
-        let text = json::find(&v, "description")
-            .and_then(json::text)
-            .filter(|t| !t.trim().is_empty());
-        Ok(text)
+        let body = json!({ "browseId": browse });
+        self.cached(format!("lyrics|{body}"), TTL_ENTITY, || {
+            let v = self.post("browse", body.clone())?;
+            Ok(json::find(&v, "description")
+                .and_then(json::text)
+                .filter(|t| !t.trim().is_empty()))
+        })
     }
 
     /// Signed-in account name, if the response carries one.
@@ -669,11 +737,14 @@ impl Innertube {
     /// Whether the account is subscribed to an artist. Needed because
     /// "toggle" without reading the current state can only ever subscribe.
     pub fn is_subscribed(&self, channel: &BrowseId) -> Result<bool> {
-        let v = self.get("browse", json!({ "browseId": channel.0 }), TTL_LIBRARY)?;
-        Ok(json::find(&v, "subscribeButtonRenderer")
-            .and_then(|b| b.get("subscribed"))
-            .and_then(|b| b.as_bool())
-            .unwrap_or(false))
+        let body = json!({ "browseId": channel.0 });
+        self.cached(format!("subscribed|{body}"), TTL_LIBRARY, || {
+            let v = self.post("browse", body.clone())?;
+            Ok(json::find(&v, "subscribeButtonRenderer")
+                .and_then(|b| b.get("subscribed"))
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false))
+        })
     }
 
     pub fn set_subscribed(&self, channel: &BrowseId, subscribed: bool) -> Result<()> {
@@ -696,9 +767,12 @@ impl Innertube {
     }
 
     /// Drop cached library pages after a write, so the change shows up.
+    ///
+    /// Subscription state is keyed separately from the artist page it came
+    /// from, so it has to go too, or the button keeps showing the old answer.
     fn invalidate_library(&self) {
         let mut c = self.cache.lock().unwrap();
-        c.retain(|k, _| !k.starts_with("browse|") || !k.contains("FEmusic_"));
+        c.retain(|k, _| !k.contains("FEmusic_") && !k.starts_with("subscribed|"));
     }
 
     /// Add to or remove from the library. This is a different operation from

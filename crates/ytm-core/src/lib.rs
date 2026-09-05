@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// An 11-character YouTube video id.
@@ -189,7 +190,10 @@ pub struct PlayerStatus {
     pub shuffle: bool,
     pub speed: f32,
     pub normalize: bool,
-    pub queue: Vec<Track>,
+    /// Shared, not owned: the engine republishes this snapshot 25 times a
+    /// second, and deep-copying every track and its strings that often was
+    /// pure allocator churn for data that changes a few times an hour.
+    pub queue: Arc<Vec<Track>>,
     pub queue_index: usize,
     /// Last error, surfaced in the status bar rather than swallowed.
     pub error: Option<String>,

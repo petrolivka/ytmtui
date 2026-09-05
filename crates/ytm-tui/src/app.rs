@@ -289,7 +289,7 @@ impl App {
         }
         let st = self.player.status();
         crate::session::save(&crate::session::Session {
-            queue: st.queue.clone(),
+            queue: st.queue.as_ref().clone(),
             index: st.queue_index,
             position: st.position.as_secs_f64(),
             volume: st.volume,

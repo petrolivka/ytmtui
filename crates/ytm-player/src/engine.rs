@@ -131,6 +131,33 @@ pub fn spawn_on_device(resolver: Arc<ResolverCache>, device: &str) -> Result<(Pl
     Ok((handle, tap))
 }
 
+/// Hand pages freed inside glibc's arenas back to the operating system.
+///
+/// A track handover frees a couple of megabytes at once - the previous
+/// decoder's ring buffer, chiefly - but glibc keeps an arena at its high-water
+/// mark, so RSS ratchets upwards over a long listening session and never comes
+/// back down. Trimming at track boundaries is cheap and puts it back.
+///
+/// glibc only. musl has no arenas to trim, and no `malloc_trim`.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn trim_heap() {
+    extern "C" {
+        fn malloc_trim(pad: usize) -> std::os::raw::c_int;
+    }
+    // Safety: `malloc_trim` takes no pointers and only walks the allocator's
+    // own free lists.
+    unsafe {
+        malloc_trim(0);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn trim_heap() {}
+
+/// Don't trim more often than this. Holding "next" would otherwise walk the
+/// free lists on every keypress for no benefit.
+const TRIM_INTERVAL: Duration = Duration::from_secs(30);
+
 struct Engine {
     _device: rodio::MixerDeviceSink,
     /// Two players on one mixer. Crossfading needs both playing at once, which
@@ -148,7 +175,10 @@ struct Engine {
     errors: Arc<Mutex<Vec<String>>>,
     status: Arc<ArcSwap<PlayerStatus>>,
 
-    queue: Vec<Track>,
+    /// Copy-on-write, so `publish` can hand the UI a snapshot 25 times a
+    /// second without deep-copying every track. Mutating it clones the vector
+    /// once, which is fine: the queue changes a handful of times an hour.
+    queue: Arc<Vec<Track>>,
     index: usize,
     state: PlayState,
     repeat: RepeatMode,
@@ -164,6 +194,8 @@ struct Engine {
     started: Option<Instant>,
     error: Option<String>,
     rng: u64,
+    /// When the heap was last trimmed, so a burst of skips does not.
+    last_trim: Instant,
 }
 
 impl Engine {
@@ -189,7 +221,7 @@ impl Engine {
             sink,
             errors,
             status,
-            queue: Vec::new(),
+            queue: Arc::new(Vec::new()),
             index: 0,
             state: PlayState::Stopped,
             repeat: RepeatMode::Off,
@@ -202,6 +234,7 @@ impl Engine {
             started: None,
             error: None,
             rng: 0x2545F4914F6CDD1D,
+            last_trim: Instant::now(),
         })
     }
 
@@ -241,13 +274,13 @@ impl Engine {
     fn handle(&mut self, c: Command) {
         match c {
             Command::PlayQueue { tracks, index } => {
-                self.queue = tracks;
+                self.queue = Arc::new(tracks);
                 self.index = index.min(self.queue.len().saturating_sub(1));
                 self.start(0.0);
             }
             Command::Enqueue(t) => {
                 let was_last = self.index + 1 >= self.queue.len();
-                self.queue.push(t);
+                Arc::make_mut(&mut self.queue).push(t);
                 // Appending only changes what plays next if nothing followed.
                 if was_last {
                     self.disarm_and_correct();
@@ -258,7 +291,7 @@ impl Engine {
                     return;
                 }
                 let was_empty_ahead = self.index + 1 >= self.queue.len();
-                self.queue.extend(tracks);
+                Arc::make_mut(&mut self.queue).extend(tracks);
                 if self.state == PlayState::Stopped && was_empty_ahead {
                     self.index += 1;
                     self.start(0.0);
@@ -266,7 +299,7 @@ impl Engine {
             }
             Command::PlayNext(t) => {
                 let at = (self.index + 1).min(self.queue.len());
-                self.queue.insert(at, t);
+                Arc::make_mut(&mut self.queue).insert(at, t);
                 // The armed decoder is for whatever used to be next.
                 self.disarm_and_correct();
             }
@@ -278,7 +311,7 @@ impl Engine {
                 if tracks.is_empty() {
                     return;
                 }
-                self.queue = tracks;
+                self.queue = Arc::new(tracks);
                 self.index = index.min(self.queue.len() - 1);
                 self.start(position);
                 self.player().pause();
@@ -295,7 +328,7 @@ impl Engine {
                     if i == self.index + 1 {
                         self.disarm_and_correct();
                     }
-                    self.queue.remove(i);
+                    Arc::make_mut(&mut self.queue).remove(i);
                     if i < self.index {
                         self.index -= 1;
                     } else if i == self.index {
@@ -489,6 +522,7 @@ impl Engine {
                 self.fading = None;
                 self.started = Some(Instant::now());
                 self.prefetch_next();
+                self.maybe_trim();
             }
             return;
         }
@@ -622,11 +656,21 @@ impl Engine {
                 self.state = PlayState::Playing;
                 self.started = Some(Instant::now());
                 self.prefetch_next();
+                // The previous decoder is gone by now, so this is the moment
+                // its buffers can actually be given back.
+                self.maybe_trim();
             }
             Err(e) => {
                 self.error = Some(format!("decode failed: {e}"));
                 self.state = PlayState::Stopped;
             }
+        }
+    }
+
+    fn maybe_trim(&mut self) {
+        if self.last_trim.elapsed() >= TRIM_INTERVAL {
+            self.last_trim = Instant::now();
+            trim_heap();
         }
     }
 
@@ -669,6 +713,9 @@ impl Engine {
                 self.armed = None;
                 self.started = Some(Instant::now());
                 self.prefetch_next();
+                // rodio has dropped the finished source, so its ring buffer is
+                // free and can go back to the OS.
+                self.maybe_trim();
             }
             return;
         }
@@ -711,7 +758,7 @@ impl Engine {
         }
         for i in (start + 1..self.queue.len()).rev() {
             let j = start + (self.next_rand() as usize % (i - start + 1));
-            self.queue.swap(i, j);
+            Arc::make_mut(&mut self.queue).swap(i, j);
         }
     }
 

@@ -67,16 +67,25 @@ fn draw_graphics_cover(app: &App) -> Result<()> {
             .max(area.height as u32 * 2)
             .clamp(64, 544),
     );
-    let Some(img) = app.art_cache.get(&want) else {
-        return Ok(());
-    };
-
     // Redraw only when the image or its position actually changed. These
     // escapes are not part of the frame diff, so nothing erases them in the
     // meantime and repeating them every frame buys nothing.
-    if app.hit.painted.borrow().as_ref() == Some(&(want.clone(), area)) {
+    //
+    // This has to come before the cache lookup, not after: `get` hands back an
+    // owned copy of the decoded cover, so asking first and checking second
+    // meant cloning the whole image every frame only to discard it.
+    if app
+        .hit
+        .painted
+        .borrow()
+        .as_ref()
+        .is_some_and(|(painted, at)| painted == &want && *at == area)
+    {
         return Ok(());
     }
+    let Some(img) = app.art_cache.get(&want) else {
+        return Ok(());
+    };
 
     let mut out = std::io::stdout().lock();
     // Remove the previous placement first. Re-transmitting under the same id
