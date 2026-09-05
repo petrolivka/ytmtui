@@ -3418,6 +3418,7 @@ name = "ytmtui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "serde_json",
  "ytm-api",
  "ytm-core",
  "ytm-player",

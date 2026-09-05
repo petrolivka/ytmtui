@@ -7,8 +7,9 @@
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
-use std::collections::BTreeMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ytm_core::{BrowseId, Rating, Row, Track, VideoId};
 
 use crate::{json, parse};
@@ -124,10 +125,31 @@ impl LibrarySection {
     ];
 }
 
+/// A page of rows, with the token that fetches the next one.
+#[derive(Debug, Clone, Default)]
+pub struct RowPage {
+    pub title: Option<String>,
+    pub rows: Vec<Row>,
+    pub continuation: Option<String>,
+}
+
+/// How long a cached response stays usable. Caching is not only a speed
+/// optimisation here: it keeps repeat views from re-hitting the API, which is
+/// part of looking like a player rather than a scraper (FR-N1/N2, R11).
+const TTL_SEARCH: Duration = Duration::from_secs(5 * 60);
+const TTL_HOME: Duration = Duration::from_secs(15 * 60);
+const TTL_LIBRARY: Duration = Duration::from_secs(2 * 60);
+const TTL_ENTITY: Duration = Duration::from_secs(24 * 60 * 60);
+/// Minimum spacing between requests. One stream plus the odd browse is a
+/// player-shaped pattern; bursts are not.
+const MIN_REQUEST_SPACING: Duration = Duration::from_millis(120);
+
 pub struct Innertube {
     http: reqwest::blocking::Client,
     /// None when running anonymously; search still works.
     auth: Option<Auth>,
+    cache: Mutex<HashMap<String, (Instant, Value)>>,
+    last_request: Mutex<Option<Instant>>,
 }
 
 struct Auth {
@@ -138,7 +160,12 @@ struct Auth {
 impl Innertube {
     /// Anonymous client. Search and playback work; account features do not.
     pub fn anonymous() -> Result<Self> {
-        Ok(Self { http: client()?, auth: None })
+        Ok(Self {
+            http: client()?,
+            auth: None,
+            cache: Mutex::new(HashMap::new()),
+            last_request: Mutex::new(None),
+        })
     }
 
     /// Authenticated from a raw `Cookie:` header value or Netscape cookies.txt.
@@ -161,6 +188,8 @@ impl Innertube {
         Ok(Self {
             http: client()?,
             auth: Some(Auth { cookie_header, sapisid }),
+            cache: Mutex::new(HashMap::new()),
+            last_request: Mutex::new(None),
         })
     }
 
@@ -179,7 +208,33 @@ impl Innertube {
         format!("SAPISIDHASH {ts}_{}", hex::encode(h.finalize()))
     }
 
+    /// Cached read. Writes and per-track lookups deliberately bypass this.
+    fn get(&self, endpoint: &str, body: Value, ttl: Duration) -> Result<Value> {
+        let key = format!("{endpoint}|{body}");
+        if let Some((at, v)) = self.cache.lock().unwrap().get(&key) {
+            if at.elapsed() < ttl {
+                return Ok(v.clone());
+            }
+        }
+        let v = self.post(endpoint, body)?;
+        self.cache.lock().unwrap().insert(key, (Instant::now(), v.clone()));
+        Ok(v)
+    }
+
+    /// Space requests out so a burst of navigation does not look like scraping.
+    fn pace(&self) {
+        let mut last = self.last_request.lock().unwrap();
+        if let Some(t) = *last {
+            let since = t.elapsed();
+            if since < MIN_REQUEST_SPACING {
+                std::thread::sleep(MIN_REQUEST_SPACING - since);
+            }
+        }
+        *last = Some(Instant::now());
+    }
+
     fn post(&self, endpoint: &str, mut body: Value) -> Result<Value> {
+        self.pace();
         body["context"] = json!({
             "client": {
                 "clientName": CLIENT_NAME,
@@ -209,6 +264,15 @@ impl Innertube {
         let resp = req.json(&body).send()?;
         let status = resp.status();
         let text = resp.text()?;
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            // FR-A4: an expired cookie is the single most likely auth failure,
+            // and "HTTP 401" alone does not tell the user what to do about it.
+            bail!(
+                "session expired or rejected (HTTP {}). Re-export cookies for \
+                 music.youtube.com while signed in.",
+                status.as_u16()
+            );
+        }
         if !status.is_success() {
             bail!("{endpoint} -> HTTP {status}: {}", &text[..text.len().min(240)]);
         }
@@ -218,21 +282,30 @@ impl Innertube {
     // ---- reads -------------------------------------------------------------
 
     /// Search one results tab. Works anonymously.
-    pub fn search(&self, query: &str, filter: SearchFilter) -> Result<Vec<Row>> {
-        let v = self.post("search", json!({ "query": query, "params": filter.params() }))?;
+    pub fn search(&self, query: &str, filter: SearchFilter) -> Result<RowPage> {
+        let v = self.get(
+            "search",
+            json!({ "query": query, "params": filter.params() }),
+            TTL_SEARCH,
+        )?;
         let rows = parse::page_rows(&v);
         if !rows.is_empty() {
-            return Ok(rows);
+            return Ok(RowPage { title: None, rows, continuation: parse::continuation(&v) });
         }
         // The filter blob may have gone stale; unfiltered beats empty.
-        let v = self.post("search", json!({ "query": query }))?;
-        Ok(parse::page_rows(&v))
+        let v = self.get("search", json!({ "query": query }), TTL_SEARCH)?;
+        Ok(RowPage {
+            title: None,
+            rows: parse::page_rows(&v),
+            continuation: parse::continuation(&v),
+        })
     }
 
     /// Songs only, as a track list - used for "play these results".
     pub fn search_songs(&self, query: &str) -> Result<Vec<Track>> {
         Ok(self
             .search(query, SearchFilter::Songs)?
+            .rows
             .into_iter()
             .filter_map(|r| match r {
                 Row::Track(t) => Some(t),
@@ -242,30 +315,44 @@ impl Innertube {
     }
 
     /// The account's Home feed: Quick picks, Listen again, mixes.
-    pub fn home(&self) -> Result<Vec<Row>> {
-        let v = self.post("browse", json!({ "browseId": "FEmusic_home" }))?;
-        Ok(parse::page_rows(&v))
+    pub fn home(&self) -> Result<RowPage> {
+        self.browse_page("FEmusic_home", TTL_HOME)
+    }
+
+    /// Fetch the next page of a list. Returns the rows and the token for the
+    /// page after, if any.
+    pub fn continue_rows(&self, token: &str) -> Result<RowPage> {
+        let v = self.get("browse", json!({ "continuation": token }), TTL_LIBRARY)?;
+        let mut rows = parse::page_rows(&v);
+        if rows.is_empty() {
+            rows = parse::flat_rows(&v);
+        }
+        Ok(RowPage { title: None, rows, continuation: parse::continuation(&v) })
     }
 
     /// Fetch an arbitrary browse id. Used by the `probe` diagnostic to find
     /// which ids are still live.
     pub fn browse_raw(&self, browse_id: &str) -> Result<Vec<Row>> {
-        let v = self.post("browse", json!({ "browseId": browse_id }))?;
-        let rows = parse::page_rows(&v);
-        if rows.is_empty() {
-            return Ok(parse::flat_rows(&v));
-        }
-        Ok(rows)
+        Ok(self.browse_page(browse_id, TTL_LIBRARY)?.rows)
     }
 
     /// A library section, or the play history.
-    pub fn library(&self, section: LibrarySection) -> Result<Vec<Row>> {
-        self.browse_raw(section.browse_id())
+    pub fn library(&self, section: LibrarySection) -> Result<RowPage> {
+        self.browse_page(section.browse_id(), TTL_LIBRARY)
     }
 
     /// A discovery surface: Explore, New releases, Charts.
-    pub fn explore(&self, section: ExploreSection) -> Result<Vec<Row>> {
-        self.browse_raw(section.browse_id())
+    pub fn explore(&self, section: ExploreSection) -> Result<RowPage> {
+        self.browse_page(section.browse_id(), TTL_HOME)
+    }
+
+    fn browse_page(&self, browse_id: &str, ttl: Duration) -> Result<RowPage> {
+        let v = self.get("browse", json!({ "browseId": browse_id }), ttl)?;
+        let mut rows = parse::page_rows(&v);
+        if rows.is_empty() {
+            rows = parse::flat_rows(&v);
+        }
+        Ok(RowPage { title: page_title(&v), rows, continuation: parse::continuation(&v) })
     }
 
     /// Radio / autoplay queue seeded from a track, i.e. what the official
@@ -283,6 +370,7 @@ impl Innertube {
     pub fn liked_songs(&self) -> Result<Vec<Track>> {
         Ok(self
             .library(LibrarySection::Liked)?
+            .rows
             .into_iter()
             .filter_map(|r| match r {
                 Row::Track(t) => Some(t),
@@ -292,14 +380,18 @@ impl Innertube {
     }
 
     /// An artist page: top songs, albums, singles.
-    pub fn artist(&self, id: &BrowseId) -> Result<(String, Vec<Row>)> {
-        let v = self.post("browse", json!({ "browseId": id.0 }))?;
-        Ok((page_title(&v).unwrap_or_else(|| "Artist".into()), parse::page_rows(&v)))
+    pub fn artist(&self, id: &BrowseId) -> Result<RowPage> {
+        let v = self.get("browse", json!({ "browseId": id.0 }), TTL_ENTITY)?;
+        Ok(RowPage {
+            title: page_title(&v),
+            rows: parse::page_rows(&v),
+            continuation: parse::continuation(&v),
+        })
     }
 
     /// An album page: its tracklist.
-    pub fn album(&self, id: &BrowseId) -> Result<(String, Vec<Row>)> {
-        let v = self.post("browse", json!({ "browseId": id.0 }))?;
+    pub fn album(&self, id: &BrowseId) -> Result<RowPage> {
+        let v = self.get("browse", json!({ "browseId": id.0 }), TTL_ENTITY)?;
         let mut rows = parse::flat_rows(&v);
         if rows.is_empty() {
             rows = parse::page_rows(&v);
@@ -318,23 +410,23 @@ impl Innertube {
                 }
             }
         }
-        Ok((page_title(&v).unwrap_or_else(|| "Album".into()), rows))
+        Ok(RowPage { title: page_title(&v), rows, continuation: parse::continuation(&v) })
     }
 
     /// A playlist page. Accepts either a browse id ("VL...") or a raw
     /// playlist id, which is not interchangeable with it.
-    pub fn playlist(&self, id: &BrowseId) -> Result<(String, Vec<Row>)> {
+    pub fn playlist(&self, id: &BrowseId) -> Result<RowPage> {
         let browse = if id.0.starts_with("VL") || id.0.starts_with("FE") {
             id.0.clone()
         } else {
             format!("VL{}", id.0)
         };
-        let v = self.post("browse", json!({ "browseId": browse }))?;
+        let v = self.get("browse", json!({ "browseId": browse }), TTL_LIBRARY)?;
         let mut rows = parse::flat_rows(&v);
         if rows.is_empty() {
             rows = parse::page_rows(&v);
         }
-        Ok((page_title(&v).unwrap_or_else(|| "Playlist".into()), rows))
+        Ok(RowPage { title: page_title(&v), rows, continuation: parse::continuation(&v) })
     }
 
     /// Signed-in account name, if the response carries one.
@@ -347,6 +439,22 @@ impl Innertube {
     /// what the account actually holds rather than a guess.
     pub fn track_state(&self, id: &VideoId) -> Result<(Rating, Option<String>, Option<String>, bool)> {
         let v = self.watch_next(id)?;
+
+        // The rating of the *current* track lives in the player overlay, not in
+        // the queue rows - those carry no likeStatus at all, which is why
+        // reading it from them reported Indifferent for everything.
+        let rating = v
+            .get("playerOverlays")
+            .and_then(|o| json::find(o, "likeStatus"))
+            .and_then(|s| s.as_str())
+            .map(|s| match s {
+                "LIKE" => Rating::Like,
+                "DISLIKE" => Rating::Dislike,
+                _ => Rating::Indifferent,
+            })
+            .unwrap_or(Rating::Indifferent);
+
+        // Library tokens do come from the queue row for this video.
         let mut items = Vec::new();
         json::find_all(&v, "playlistPanelVideoRenderer", &mut items);
         let me = items
@@ -354,10 +462,16 @@ impl Innertube {
             .find(|i| i.get("videoId").and_then(|x| x.as_str()) == Some(id.0.as_str()))
             .copied()
             .or_else(|| items.first().copied());
-        match me.and_then(parse::track_from) {
-            Some(t) => Ok((t.rating, t.feedback_token_add, t.feedback_token_remove, t.in_library)),
-            None => Ok((Rating::Indifferent, None, None, false)),
-        }
+        let (add, remove, in_library) = match me.and_then(parse::track_from) {
+            Some(t) => (t.feedback_token_add, t.feedback_token_remove, t.in_library),
+            None => (None, None, false),
+        };
+        Ok((rating, add, remove, in_library))
+    }
+
+    /// Raw watch-next response, for diagnostics.
+    pub fn debug_next(&self, seed: &VideoId) -> Result<Value> {
+        self.watch_next(seed)
     }
 
     fn watch_next(&self, seed: &VideoId) -> Result<Value> {

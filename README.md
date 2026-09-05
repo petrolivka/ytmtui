@@ -16,10 +16,11 @@ spectrum where the album art would be.
 ╰───────────────────────────────────────────────────────────────────────────────╯
 ```
 
-**Status: M1 (skeleton player).** Search, play, pause, seek, volume, queue,
-shuffle/repeat, thumbs up/down, and the live spectrum all work. Home feed,
-Explore, artist/album pages, playlist editing and lyrics are not built yet — see
-the [roadmap](docs/ANALYSIS-AND-REQUIREMENTS.md#13-roadmap).
+**Status: M2 (parity core).** Home, Explore, Charts, the full library, artist /
+album / playlist pages, search across four tabs, queue, radio and autoplay,
+thumbs up/down, the library toggle, and the live spectrum all work — a listening
+session needs no browser. Playlist editing, lyrics, themes and a config file are
+next; see the [roadmap](docs/ANALYSIS-AND-REQUIREMENTS.md#13-roadmap).
 
 ## ⚠️ Read this before signing in
 
@@ -81,12 +82,14 @@ The cookie jar must contain `__Secure-3PAPISID`, which is used to compute the
 | Key | Action | | Key | Action |
 |---|---|---|---|---|
 | `/` | search | | `+` / `l` | thumbs up (toggles) |
-| `Enter` | play selection / jump to | | `-` / `d` | thumbs down (toggles, skips) |
-| `o` / `e` | play next / queue at end | | `s` / `r` | shuffle / repeat |
-| `x` | remove from queue | | `9` / `0` | volume down / up |
-| `Space` | play / pause | | `Tab` | switch pane |
-| `n` / `p` | next / previous | | `v` / `z` | visualiser style / fullscreen |
-| `←` `→` | seek 5s (Shift: 30s) | | `?` / `q` | help / quit |
+| `Enter` | open: play, or descend into album/artist/playlist | | `-` / `d` | thumbs down (toggles, skips) |
+| `Esc` | back | | `a` | add to / remove from library |
+| `Tab` / `Shift-Tab` | cycle sidebar / content / queue | | `s` / `r` | shuffle / repeat |
+| `[` `]` | previous / next search tab | | `R` / `A` | radio from selection / autoplay |
+| `g` / `G` | go to artist / album | | `9` / `0` | volume down / up |
+| `o` / `e` | play next / queue at end | | `v` / `z` | visualiser style / fullscreen |
+| `x` | remove from queue | | `?` / `q` | help / quit |
+| `Space`, `n`/`p`, `←`/`→` | play/pause, next/prev, seek (Shift: 30s) | | | |
 
 Thumbs up adds to **Liked Songs**; it does *not* add to your library. Those are
 genuinely different operations in YouTube Music, and ytmtui keeps them distinct.
@@ -94,19 +97,23 @@ genuinely different operations in YouTube Music, and ytmtui keeps them distinct.
 ## Tools
 
 ```bash
-cargo run --release --bin tune -- <videoId|file> [seconds]
+cargo run --release --bin tune -- <videoId|file> [seconds]   # analyser tuning
+cargo run --release --bin probe                              # API self-test
+cargo run --release --bin authcheck                          # credential check
 ```
 
-Dumps the measured distribution of spectrum band energies. The analyser's
-tuning constants were derived from this rather than chosen by eye; re-run it
-after changing them.
+`tune` dumps the measured distribution of spectrum band energies; the
+analyser's constants were derived from it rather than chosen by eye. `probe`
+exercises every InnerTube surface read-only and reports what actually comes
+back, so a stale browse id is discovered deliberately instead of silently
+yielding an empty page.
 
 ## Layout
 
 ```
 crates/ytm-core    domain types (no I/O)
 crates/ytm-viz     FFT, banding, smoothing, peaks (no I/O - unit-testable)
-crates/ytm-api     InnerTube: search, auth, ratings
+crates/ytm-api     InnerTube: search, browse, auth, ratings, caching
 crates/ytm-player  stream resolution, ffmpeg decode, PCM tap, queue engine
 crates/ytm-tui     ratatui views, spectrum widget, theming, keymap
 ```

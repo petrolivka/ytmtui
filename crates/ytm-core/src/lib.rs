@@ -246,9 +246,12 @@ impl Row {
         match self {
             Row::Header(_) => String::new(),
             Row::Track(t) => t.artist.clone(),
-            Row::Album(a) => match &a.year {
-                Some(y) => format!("{} \u{2022} {}", a.artist, y),
-                None => a.artist.clone(),
+            Row::Album(a) => match (a.artist.is_empty(), &a.year) {
+                // On an artist page the artist is implied and only the year is
+                // given; joining blindly leaves a dangling bullet.
+                (true, Some(y)) => y.clone(),
+                (false, Some(y)) => format!("{} \u{2022} {}", a.artist, y),
+                (_, None) => a.artist.clone(),
             },
             Row::Artist(a) => a.subtitle.clone(),
             Row::Playlist(p) => p.subtitle.clone(),

@@ -3,7 +3,7 @@
 //! find out which browse ids have gone stale.
 
 use anyhow::Result;
-use ytm_api::{LibrarySection, MusicBackend, SearchFilter};
+use ytm_api::{LibrarySection, SearchFilter};
 use ytm_core::{BrowseId, Row};
 
 fn summarise(rows: &[Row]) -> String {
@@ -29,6 +29,10 @@ fn show(rows: &[Row], n: usize) {
     }
 }
 
+fn more(p: &ytm_api::RowPage) -> String {
+    if p.continuation.is_some() { "  (+more)".into() } else { String::new() }
+}
+
 fn trunc(s: &str, n: usize) -> String {
     if s.chars().count() <= n { s.to_string() } else { s.chars().take(n - 1).collect::<String>() + "\u{2026}" }
 }
@@ -39,14 +43,14 @@ fn main() -> Result<()> {
 
     println!("== home ==");
     match yt.home() {
-        Ok(r) => { println!("   {}", summarise(&r)); show(&r, 10); }
+        Ok(p) => { println!("   {}{}", summarise(&p.rows), more(&p)); show(&p.rows, 10); }
         Err(e) => println!("   FAILED: {e}"),
     }
 
     println!("\n== search tabs ==");
     for f in SearchFilter::ALL {
         match yt.search("aphex twin", f) {
-            Ok(r) => { println!("   {:<10} {}", f.label(), summarise(&r)); show(&r, 3); }
+            Ok(p) => { println!("   {:<10} {}{}", f.label(), summarise(&p.rows), more(&p)); show(&p.rows, 3); }
             Err(e) => println!("   {:<10} FAILED: {e}", f.label()),
         }
     }
@@ -57,10 +61,10 @@ fn main() -> Result<()> {
     let mut first_playlist: Option<BrowseId> = None;
     for sec in LibrarySection::ALL {
         match yt.library(sec) {
-            Ok(r) => {
-                println!("   {:<14} {}", sec.label(), summarise(&r));
-                show(&r, 3);
-                for row in &r {
+            Ok(p) => {
+                println!("   {:<14} {}{}", sec.label(), summarise(&p.rows), more(&p));
+                show(&p.rows, 3);
+                for row in &p.rows {
                     match row {
                         Row::Album(a) if first_album.is_none() => first_album = Some(a.id.clone()),
                         Row::Artist(a) if first_artist.is_none() => first_artist = Some(a.id.clone()),
@@ -76,51 +80,100 @@ fn main() -> Result<()> {
     println!("\n== entity pages ==");
     // Fall back to search results when the library has nothing of a kind.
     if first_album.is_none() {
-        if let Ok(r) = yt.search("selected ambient works", SearchFilter::Albums) {
-            first_album = r.iter().find_map(|x| match x { Row::Album(a) => Some(a.id.clone()), _ => None });
+        if let Ok(p) = yt.search("selected ambient works", SearchFilter::Albums) {
+            first_album = p.rows.iter().find_map(|x| match x { Row::Album(a) => Some(a.id.clone()), _ => None });
         }
     }
     if first_artist.is_none() {
-        if let Ok(r) = yt.search("aphex twin", SearchFilter::Artists) {
-            first_artist = r.iter().find_map(|x| match x { Row::Artist(a) => Some(a.id.clone()), _ => None });
+        if let Ok(p) = yt.search("aphex twin", SearchFilter::Artists) {
+            first_artist = p.rows.iter().find_map(|x| match x { Row::Artist(a) => Some(a.id.clone()), _ => None });
         }
     }
     if first_playlist.is_none() {
-        if let Ok(r) = yt.search("ambient", SearchFilter::Playlists) {
-            first_playlist = r.iter().find_map(|x| match x { Row::Playlist(p) => Some(p.id.clone()), _ => None });
+        if let Ok(p) = yt.search("ambient", SearchFilter::Playlists) {
+            first_playlist = p.rows.iter().find_map(|x| match x { Row::Playlist(q) => Some(q.id.clone()), _ => None });
         }
     }
 
     if let Some(id) = &first_artist {
         match yt.artist(id) {
-            Ok((t, r)) => { println!("   artist   {id} -> \"{t}\": {}", summarise(&r)); show(&r, 6); }
+            Ok(p) => { println!("   artist   {id} -> \"{}\": {}{}", p.title.clone().unwrap_or_default(), summarise(&p.rows), more(&p)); show(&p.rows, 6); }
             Err(e) => println!("   artist   {id} FAILED: {e}"),
         }
     }
     if let Some(id) = &first_album {
         match yt.album(id) {
-            Ok((t, r)) => { println!("   album    {id} -> \"{t}\": {}", summarise(&r)); show(&r, 5); }
+            Ok(p) => { println!("   album    {id} -> \"{}\": {}{}", p.title.clone().unwrap_or_default(), summarise(&p.rows), more(&p)); show(&p.rows, 5); }
             Err(e) => println!("   album    {id} FAILED: {e}"),
         }
     }
     if let Some(id) = &first_playlist {
         match yt.playlist(id) {
-            Ok((t, r)) => { println!("   playlist {id} -> \"{t}\": {}", summarise(&r)); show(&r, 5); }
+            Ok(p) => { println!("   playlist {id} -> \"{}\": {}{}", p.title.clone().unwrap_or_default(), summarise(&p.rows), more(&p)); show(&p.rows, 5); }
             Err(e) => println!("   playlist {id} FAILED: {e}"),
         }
     }
 
     println!("\n== track state (rating + library tokens) ==");
-    let id = ytm_core::VideoId("sWcLccMuCA8".into());
-    match yt.track_state(&id) {
-        Ok((r, add, rem, in_lib)) => println!(
-            "   {id}: rating={r:?} in_library={in_lib} add_token={} remove_token={}",
-            add.is_some(), rem.is_some()
-        ),
-        Err(e) => println!("   FAILED: {e}"),
+    // Cross-check against the liked list: if a track that is demonstrably in
+    // Liked Songs reports Indifferent, the likeStatus parsing is the problem,
+    // not the account.
+    let liked = yt.library(LibrarySection::Liked).map(|p| p.rows).unwrap_or_default();
+    let ids: Vec<ytm_core::VideoId> = std::env::args()
+        .skip(1)
+        .filter(|a| a.len() == 11)
+        .map(ytm_core::VideoId)
+        .chain(liked.iter().filter_map(|r| r.as_track()).take(3).map(|t| t.id.clone()))
+        .collect();
+    for id in ids {
+        let in_liked_list = liked.iter().filter_map(|r| r.as_track()).any(|t| t.id == id);
+        match yt.track_state(&id) {
+            Ok((r, add, rem, in_lib)) => println!(
+                "   {id}: rating={r:?} (in Liked list: {in_liked_list})  in_library={in_lib} tokens={}/{}",
+                add.is_some(), rem.is_some()
+            ),
+            Err(e) => println!("   {id}: FAILED: {e}"),
+        }
+    }
+    if std::env::args().any(|a| a == "--where-is-likestatus") {
+        let id = ytm_core::VideoId(
+            std::env::args().find(|a| a.len() == 11).unwrap_or_else(|| "sWcLccMuCA8".into()),
+        );
+        let v = yt.debug_next(&id)?;
+        let mut hits = Vec::new();
+        walk(&v, String::new(), &mut hits);
+        println!("occurrences of likeStatus in the watch-next response:");
+        for (path, val) in hits.iter().take(20) {
+            println!("   {val:<14} {path}");
+        }
+        if hits.is_empty() {
+            println!("   none - likeStatus is not in this response at all");
+        }
+        return Ok(());
     }
     probe_candidates(&yt);
     Ok(())
+}
+
+/// Record the JSON path of every `likeStatus` so it is located from evidence
+/// rather than guessed at.
+fn walk(v: &serde_json::Value, path: String, out: &mut Vec<(String, String)>) {
+    match v {
+        serde_json::Value::Object(m) => {
+            for (k, x) in m {
+                if k == "likeStatus" {
+                    out.push((format!("{path}.{k}"), x.as_str().unwrap_or("?").to_string()));
+                }
+                walk(x, format!("{path}.{k}"), out);
+            }
+        }
+        serde_json::Value::Array(a) => {
+            for (i, x) in a.iter().enumerate() {
+                walk(x, format!("{path}[{i}]"), out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Candidate browse ids for surfaces whose id may have gone stale.

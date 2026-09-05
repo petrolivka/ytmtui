@@ -111,35 +111,58 @@ fn main() -> Result<()> {
 
     println!("\n== write path (this mutates your real account) ==");
 
-    // Verify by *presence of this id*, not by list length: the first page is
-    // capped, so a count comparison stays flat once the page is full.
-    let was_liked = liked.iter().any(|t| t.id == id);
-    println!("  already liked before : {was_liked}");
+    // Verify against the track's own rating, not membership of the Liked Music
+    // list. That list is a derived auto-playlist and lags behind by minutes, so
+    // checking it reports failures that did not happen - and, worse, would hide
+    // real ones.
+    let before = yt.track_state(&id)?.0;
+    println!("  rating before        : {before:?}");
 
     yt.rate(&id, Rating::Like)?;
-    println!("  sent like for {id}");
     std::thread::sleep(std::time::Duration::from_millis(1500));
+    let during = yt.track_state(&id)?.0;
+    println!("  rating after like    : {during:?}");
 
-    let after = yt.liked_songs()?;
-    let now_liked = after.iter().any(|t| t.id == id);
-    let at_top = after.first().map(|t| t.id == id).unwrap_or(false);
-    println!("  present in liked now : {now_liked}{}", if at_top { " (at the top)" } else { "" });
-
-    // Restore whatever the state was. Never clobber a like the user already had.
-    if was_liked {
-        println!("  leaving it liked, because it already was before this test");
-    } else {
-        yt.rate(&id, Rating::Indifferent)?;
-        println!("  like removed again - previous state restored");
-    }
+    // Restore exactly what was there. Never clobber a rating the user had.
+    yt.rate(&id, before)?;
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+    let after = yt.track_state(&id)?.0;
+    println!("  rating restored to   : {after:?}");
 
     println!();
-    if now_liked && !was_liked {
-        println!("  WRITE PATH CONFIRMED");
-    } else if was_liked {
-        println!("  inconclusive: the track was already liked. Re-run with a track you have not liked.");
+    if during == Rating::Like && after == before {
+        println!("  WRITE PATH CONFIRMED (liked, then restored)");
+    } else if during != Rating::Like {
+        println!("  the like did not take effect - check the account in a browser");
     } else {
-        println!("  request succeeded but the like did not appear. Check the account in a browser.");
+        println!("  liked, but restoring to {before:?} did not stick - now {after:?}");
+    }
+
+    if let Some(i) = args.iter().position(|a| a == "--library") {
+        let _ = i;
+        println!("\n== library toggle (also mutates the account) ==");
+        let (_, add, remove, in_lib) = yt.track_state(&id)?;
+        println!("  in library before    : {in_lib}");
+        let token = if in_lib { remove.clone() } else { add.clone() };
+        match token {
+            Some(t) => {
+                yt.set_library(&t)?;
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+                let (_, add2, rem2, now_lib) = yt.track_state(&id)?;
+                println!("  in library after     : {now_lib}");
+                let back = if now_lib { rem2 } else { add2 };
+                if let Some(t2) = back {
+                    yt.set_library(&t2)?;
+                    println!("  restored");
+                }
+                if now_lib != in_lib {
+                    println!("\n  LIBRARY TOGGLE CONFIRMED");
+                } else {
+                    println!("\n  library state did not change");
+                }
+            }
+            None => println!("  no feedback token available for this track"),
+        }
     }
     Ok(())
 }

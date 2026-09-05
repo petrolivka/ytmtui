@@ -44,6 +44,26 @@ fn browse_id(endpoint: &Value) -> Option<BrowseId> {
         .map(|s| BrowseId(s.to_string()))
 }
 
+/// The token that fetches the next page of a list, if there is one.
+///
+/// InnerTube has used several shapes for this over time; accept any of them
+/// rather than tying paging to one.
+pub fn continuation(v: &Value) -> Option<String> {
+    if let Some(t) = json::find(v, "continuationCommand")
+        .and_then(|c| c.get("token"))
+        .and_then(|c| c.as_str())
+    {
+        return Some(t.to_string());
+    }
+    if let Some(t) = json::find(v, "nextContinuationData")
+        .and_then(|c| c.get("continuation"))
+        .and_then(|c| c.as_str())
+    {
+        return Some(t.to_string());
+    }
+    None
+}
+
 /// Walk a browse response and produce the rows for its main pane.
 pub fn page_rows(v: &Value) -> Vec<Row> {
     let mut out = Vec::new();

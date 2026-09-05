@@ -1,6 +1,7 @@
 //! Terminal UI: state, rendering, and the main loop.
 
 pub mod app;
+pub mod nav;
 pub mod spectrum;
 pub mod theme;
 pub mod ui;

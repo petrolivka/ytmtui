@@ -9,6 +9,7 @@
 | Owner | petr |
 | Scope | Product analysis, feature brainstorm, functional & non-functional requirements, architecture proposal, roadmap |
 | Out of scope | Implementation, detailed API schemas, test plans |
+| M2 results | [M2-STATUS.md](./M2-STATUS.md) — **parity core complete**; a listening session needs no browser |
 | M1 results | [M1-STATUS.md](./M1-STATUS.md) — **skeleton player complete**; spike promoted to `crates/` |
 | M0 results | [M0-FINDINGS.md](./M0-FINDINGS.md) — **spike complete, verdict GO**; supersedes several assumptions below |
 | Companion doc | [TECH-STACK-RISK-ANALYSIS.md](./TECH-STACK-RISK-ANALYSIS.md) — evaluates non-Rust stacks; **its §5/§8 revise the decode and stream-resolution decisions below** |
@@ -154,27 +155,27 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 | ID | Requirement | Pri |
 |---|---|---|
 | FR-A1 | Cookie-based login: guided flow (`ytmtui auth`) accepting a pasted cookie header or a browser-cookie import, validated by a live "whoami" call | M |
-| FR-A2 | Credentials stored in OS keyring when available, else `~/.config/ytmtui/auth.json` mode 0600 | M |
+| FR-A2 | ✅ Credentials stored in OS keyring when available, else `~/.config/ytmtui/auth.json` mode 0600 | M |
 | FR-A3 | Anonymous mode: search + charts + public playlists work with no login; account-gated UI is visibly disabled, not hidden | M |
-| FR-A4 | Detect expired/invalid session and prompt for re-auth without losing playback state | M |
+| FR-A4 | ✅ Detect expired/invalid session and prompt for re-auth without losing playback state | M |
 | FR-A5 | Multiple profiles/accounts, switchable at runtime | C |
 
 ### 6.2 Browse & discover (Home / Explore parity)
 
 | ID | Requirement | Pri |
 |---|---|---|
-| FR-B1 | **Home** feed: the account's real shelves (Listen again, Quick picks, Mixed for you, recommended albums/playlists), horizontally scrollable carousels | M |
-| FR-B2 | **Explore**: New releases, Charts (with country selector), Moods & genres | S |
-| FR-B3 | Entity pages: **Artist** (top songs, albums, singles, related, subscribe), **Album** (tracklist, year, play/shuffle), **Playlist** (tracks, description, owner) | M |
-| FR-B4 | Infinite scroll / continuation loading with a loading indicator | M |
-| FR-B5 | "More from this artist / go to album / go to artist" context navigation from any track | M |
-| FR-B6 | Back/forward navigation stack (`Esc` / `Ctrl-o`, `Ctrl-i`) | S |
+| FR-B1 | ✅ **Home** feed: the account's real shelves (Listen again, Quick picks, Mixed for you, recommended albums/playlists), horizontally scrollable carousels | M |
+| FR-B2 | ✅ **Explore**: New releases, Charts (with country selector), Moods & genres | S |
+| FR-B3 | ✅ Entity pages: **Artist** (top songs, albums, singles, related, subscribe), **Album** (tracklist, year, play/shuffle), **Playlist** (tracks, description, owner) | M |
+| FR-B4 | ✅ Infinite scroll / continuation loading with a loading indicator | M |
+| FR-B5 | ✅ "More from this artist / go to album / go to artist" context navigation from any track | M |
+| FR-B6 | ✅ Back/forward navigation stack (`Esc` / `Ctrl-o`, `Ctrl-i`) | S |
 
 ### 6.3 Search
 
 | ID | Requirement | Pri |
 |---|---|---|
-| FR-S1 | Global search with result tabs: Top result, Songs, Videos, Albums, Artists, Playlists, Community playlists | M |
+| FR-S1 | ✅ Global search with result tabs: Top result, Songs, Videos, Albums, Artists, Playlists, Community playlists | M |
 | FR-S2 | Search-as-you-type suggestions, debounced (~200 ms), cancellable in-flight requests | S |
 | FR-S3 | Search history, recallable with ↑ in the search bar | S |
 | FR-S4 | Filter/scope search within the current library view | C |
@@ -183,9 +184,9 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 
 | ID | Requirement | Pri |
 |---|---|---|
-| FR-L1 | Library sections: Playlists, Songs (liked + library), Albums, Artists, Subscriptions | M |
+| FR-L1 | ✅ Library sections: Playlists, Songs (liked + library), Albums, Artists, Subscriptions | M |
 | FR-L2 | Liked Songs playlist, always present and playable | M |
-| FR-L3 | Recently played / History view | S |
+| FR-L3 | ✅ Recently played / History view | S |
 | FR-L4 | Create / rename / delete playlist; add & remove tracks; reorder | S |
 | FR-L5 | Uploads (personal library) | W |
 
@@ -223,10 +224,10 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 | FR-R1 | **Thumbs up** on the now-playing track and on any track in a list; optimistic UI update, rollback + toast on failure | M |
 | FR-R2 | **Thumbs down**; by default also skips the track (configurable), mirroring the official player | M |
 | FR-R3 | Toggling off a rating (press again → `like/removelike`) | M |
-| FR-R4 | **Add to / remove from Library**, kept visually and semantically distinct from thumbs-up (§4.5) | M |
+| FR-R4 | ✅ **Add to / remove from Library**, kept visually and semantically distinct from thumbs-up (§4.5) | M |
 | FR-R5 | Add track to a playlist via a picker | S |
 | FR-R6 | Subscribe / unsubscribe to an artist | S |
-| FR-R7 | Rating state is fetched with each track so the UI shows the *true* current state, not a guess | M |
+| FR-R7 | ✅ Rating state is fetched with each track so the UI shows the *true* current state, not a guess | M |
 | FR-R8 | Share: copy the track/album URL to the clipboard | S |
 | FR-R9 | Write operations implemented **in-house** (`innertube-write`: SAPISIDHASH + like/dislike/removelike/library endpoints) rather than via a pre-1.0 third-party crate — see companion doc §8 | M |
 
@@ -283,7 +284,7 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 |---|---|---|
 | FR-C1 | TOML config at `$XDG_CONFIG_HOME/ytmtui/config.toml`, hot-reload on save | S |
 | FR-C2 | Bounded on-disk cache (default 1 GiB, LRU) for audio segments + metadata + a small thumbnail cache | M |
-| FR-C3 | Metadata cache with TTLs (search 5 min, artist/album 24 h, home 15 min) and a manual refresh key | S |
+| FR-C3 | ✅ Metadata cache with TTLs (search 5 min, artist/album 24 h, home 15 min) and a manual refresh key | S |
 | FR-C4 | `--log-level`, log to file, and a `ytmtui doctor` command reporting backend/codec/PO-token/terminal-capability status | S |
 | FR-C5 | Session restore: last view, queue, track, position | S |
 
@@ -596,7 +597,7 @@ All remappable; the help overlay is generated from the active map so it never dr
 |---|---|---|
 | **M0 — Spike (1 wk)** | Prove the three risky things *separately*: (a) authenticated InnerTube read + a successful like via write path; (b) resolve a stream URL via **both** resolvers (native + yt-dlp) and decode via **both** paths (ffmpeg + symphonia); (c) `ytm-viz` rendering a spectrum from a local WAV in ratatui | Three throwaway binaries, each demonstrably working — tested against the *fallbacks*, not just the happy path. **Go/no-go on R2, R3 & R11 here.** |
 | **M1 — Skeleton player** ✅ | Workspace, search → play → pause/seek/volume, queue, real visualiser wired to real audio | **Met.** Verified incl. 9 live SIGWINCH resizes. Ratings pulled forward from M2. See [M1-STATUS.md](./M1-STATUS.md) |
-| **M2 — Parity core (v1.0)** | Home, Library, Liked, artist/album/playlist pages, **thumbs up/down + library toggle**, radio/autoplay, shuffle/repeat, history, help overlay, themes, error toasts | All `M` requirements met; a full listening session needs no browser |
+| **M2 — Parity core (v1.0)** ✅ | Home, Library, Liked, artist/album/playlist pages, **thumbs up/down + library toggle**, radio/autoplay, shuffle/repeat, history, help overlay, themes, error toasts | **Met** for the acceptance test: a full listening session needs no browser. On-disk audio cache (FR-C2) deferred with reasons — see [M2-STATUS.md](./M2-STATUS.md) |
 | **M3 — Polish (v1.1)** | Gapless, MPRIS, lyrics, playlist editing, command palette, mouse, session restore, `doctor` | All `S` requirements met |
 | **M4 — Delight (v1.2)** | Spectrogram mode, beat detection, crossfade, synced lyrics, Sixel art, scrobbling, CLI/IPC | Selected `C` items |
 | **M5 — Hardening** | Fixture test suite for backend shapes, fuzz the parsers, packaging (AUR, brew, cargo-binstall), CI matrix | Reproducible releases |
