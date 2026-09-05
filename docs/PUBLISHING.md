@@ -6,52 +6,30 @@ here is a code change; it is all things only the owner can settle.
 The repository is `https://github.com/petrolivka/ytmtui`, already set as
 `origin`, and every URL in the tree points at it.
 
-## Done
+## Decided
 
-- Repository URL: `github.com/petrolivka/ytmtui`, set as `origin`, referenced
+- **Repository**: `github.com/petrolivka/ytmtui`, set as `origin`, referenced
   everywhere in the tree.
-- Private vulnerability reporting is enabled, so the advisory link in
+- **Private vulnerability reporting**: enabled, so the advisory link in
   `SECURITY.md` and the issue template resolves.
-- **Licence: GPL-3.0-or-later, decided.** Nothing forced it — all 336
-  transitive dependencies are permissive (MIT, Apache-2.0, Zlib, ISC,
-  Unicode-3.0). It was chosen because ytmtui is an application rather than a
-  library: the only realistic derivative is a fork, so copyleft costs almost
-  nothing and keeps improvements available.
+- **Licence: GPL-3.0-or-later.** Nothing forced it — all 336 transitive
+  dependencies are permissive (MIT, Apache-2.0, Zlib, ISC, Unicode-3.0). Chosen
+  because ytmtui is an application rather than a library: the only realistic
+  derivative is a fork, so copyleft costs almost nothing and keeps improvements
+  available.
 
-  Worth knowing for later: relicensing to something permissive would now need
-  every contributor's agreement, so this is effectively settled once the first
-  outside pull request lands.
-
-## Must do
-
-| | Where | Why |
-|---|---|---|
-| **Confirm the maintainer email** | `contrib/packaging/PKGBUILD` | It is the git author address, so it is already in the history — but a package file publishes it more prominently, and that invites spam. Substitute an alias if you would rather. |
-
-## Decide deliberately
-
-### The committed fixtures
-
-`crates/ytm-api/tests/fixtures/` holds 2 MB of real InnerTube responses: track
-titles, artist names, thumbnail URLs. They are anonymous captures with tracking
-fields stripped, and they are what makes the parser suite meaningful and
-offline.
-
-It is still third-party API response data in a public repository. That is a
-judgement call, not a settled question:
-
-- **Keep them** — the tests work on a fresh clone and in CI, and a shape change
-  fails loudly. This is the current setup.
-- **Stop tracking them** — add the directory to `.gitignore` and have
-  contributors run `cargo run --bin dump-fixtures` first. The suite then needs
-  network access once per clone, and CI needs a step to generate them, which
-  reintroduces exactly the "is CI red because YouTube changed?" problem the
-  fixtures exist to remove.
-
-### The name
-
-`ytmtui` is unclaimed on crates.io as far as this project knows, but that has
-not been verified. Check before a first publish.
+  Effectively irreversible once an outside contribution lands — relicensing
+  away from GPL would need every contributor's consent.
+- **Maintainer contact**: `petr.olivka@gmail.com`, as in the PKGBUILD and the
+  git history.
+- **Fixtures stay committed.** `crates/ytm-api/tests/fixtures/` holds 2 MB of
+  anonymous InnerTube responses with tracking fields stripped. Keeping them
+  means the parser suite works on a fresh clone and in CI with no network, so a
+  red build means the code broke rather than that YouTube changed overnight —
+  which is the whole reason the suite exists. Refresh them with
+  `cargo run --release --bin dump-fixtures`; never commit one captured while
+  signed in.
+- **Name**: `ytmtui` is free on crates.io.
 
 ## Before a first release
 
