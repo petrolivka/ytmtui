@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/OWNER/ytmtui/security/advisories/new
+    about: Report privately, not as a public issue. See SECURITY.md.
+  - name: Is it broken, or did YouTube change?
+    url: https://github.com/OWNER/ytmtui/blob/master/README.md#troubleshooting
+    about: The troubleshooting table covers the common causes, most of which are environmental.

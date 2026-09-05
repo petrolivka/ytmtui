@@ -1,0 +1,55 @@
+name: Bug report
+description: Something behaves differently from how it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: if playback stopped working suddenly and nothing changed
+        on your side, YouTube may have changed something. Try `pip install -U
+        yt-dlp` first, and paste the `--doctor` output below either way.
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `ytmtui --doctor`
+      description: This covers versions, audio devices, colour support and sign-in state.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ytmtui
+        2. Search for ...
+        3. Press ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: |
+        Run with `ytmtui --log-file /tmp/ytmtui.log` and paste the relevant part.
+        **Check it for anything private before pasting** — it will not contain
+        credentials, but it does contain what you were listening to.
+      render: text
+
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal emulator and version
+      placeholder: "alacritty 0.17.0"
+    validations:
+      required: true

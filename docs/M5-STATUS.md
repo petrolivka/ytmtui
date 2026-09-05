@@ -115,5 +115,5 @@ payloads are now boxed.
 | | Why |
 |---|---|
 | Windows CI | Nothing has been tested on Windows and the audio path is untried there; a green tick would claim more than is true. |
-| Publishing to crates.io / AUR / Homebrew | Needs accounts, a repository URL that exists, and a tagged release. The recipes are ready and reference `github.com/petrolivka/ytmtui`. |
+| Publishing to crates.io / AUR / Homebrew | Needs accounts, a repository URL that exists, and a tagged release. The recipes are ready and reference `github.com/OWNER/ytmtui`. |
 | Fuzzing in CI | Wants nightly and a corpus that grows across runs; better as a scheduled job once the project has a home. |

@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest something ytmtui should do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Worth checking [the requirements
+        document](../../blob/master/docs/ANALYSIS-AND-REQUIREMENTS.md) first —
+        a lot is already specified there with a priority, and the milestone
+        documents record what was deliberately deferred and why.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do that is awkward today?
+      description: The problem, not the solution — it often has a better answer than the one first imagined.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This is not a download, export, or offline-ripping feature.
+          required: true

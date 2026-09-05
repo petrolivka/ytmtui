@@ -1,0 +1,68 @@
+# Publishing checklist
+
+What still needs a human decision before this repository goes public. Nothing
+here is a code change; it is all things only the owner can settle.
+
+## Must do
+
+| | Where | Why |
+|---|---|---|
+| **Replace `OWNER`** with the real GitHub account | `Cargo.toml`, `README.md`, `contrib/packaging/PKGBUILD`, `contrib/packaging/ytmtui.rb`, `.github/ISSUE_TEMPLATE/config.yml`, `docs/M5-STATUS.md` | The repository URL was never known, so it is a placeholder rather than a guess that would silently point at nothing. |
+| **Confirm the maintainer email** | `contrib/packaging/PKGBUILD` | It is the git author address, so it is already in the history — but a package file publishes it more prominently, and that invites spam. Substitute an alias if you would rather. |
+| **Enable private vulnerability reporting** | GitHub → Settings → Security | `SECURITY.md` and the issue-template link both point at a security advisory form that must be switched on. |
+
+## Decide deliberately
+
+### The committed fixtures
+
+`crates/ytm-api/tests/fixtures/` holds 2 MB of real InnerTube responses: track
+titles, artist names, thumbnail URLs. They are anonymous captures with tracking
+fields stripped, and they are what makes the parser suite meaningful and
+offline.
+
+It is still third-party API response data in a public repository. That is a
+judgement call, not a settled question:
+
+- **Keep them** — the tests work on a fresh clone and in CI, and a shape change
+  fails loudly. This is the current setup.
+- **Stop tracking them** — add the directory to `.gitignore` and have
+  contributors run `cargo run --bin dump-fixtures` first. The suite then needs
+  network access once per clone, and CI needs a step to generate them, which
+  reintroduces exactly the "is CI red because YouTube changed?" problem the
+  fixtures exist to remove.
+
+### The licence
+
+GPL-3.0-or-later, and **nothing forces it** — all 336 transitive dependencies
+are permissive (MIT, Apache-2.0, Zlib, ISC, Unicode-3.0). If you would rather
+have MIT or Apache-2.0, change `license` in `Cargo.toml`, replace `LICENSE`,
+and update both packaging files and the README licence section.
+
+### The name
+
+`ytmtui` is unclaimed on crates.io as far as this project knows, but that has
+not been verified. Check before a first publish.
+
+## Before a first release
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets     # must be clean
+cargo test --workspace
+cargo publish --dry-run                    # after replacing OWNER
+```
+
+Then tag `v0.1.0`; the release workflow builds Linux x86-64, Linux aarch64 and
+Apple Silicon binaries and attaches them with checksums, in the archive layout
+that `cargo binstall` expects.
+
+Packaging recipes need their checksums filled in once a tag exists:
+`sha256sums` in the PKGBUILD and `sha256` in the Homebrew formula.
+
+## Not claimed, deliberately
+
+- **No Windows support.** Nothing has been tested there and the audio path is
+  untried; CI does not build it, because a green tick would claim more than is
+  true.
+- **The Kitty art backend is unverified.** It is implemented but no terminal
+  speaking that protocol was available to confirm it renders.

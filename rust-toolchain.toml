@@ -1,0 +1,6 @@
+# Pins the toolchain for anyone without mise. The version is the MSRV declared
+# in Cargo.toml; CI additionally builds against it explicitly so a bump has to
+# be deliberate.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
