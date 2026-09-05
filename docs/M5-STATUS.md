@@ -61,7 +61,7 @@ binding target asserts chords round-trip through their rendered form.
 Two workflows:
 
 - **CI** — fmt, clippy (`-D warnings`), build and test on Linux and macOS,
-  plus a Linux run pinned to the 1.85 MSRV so a bump has to be deliberate.
+  plus a Linux run pinned to the declared MSRV so a bump has to be deliberate.
 - **offline-guarantee** — runs the parser suites inside `unshare -rn`, a
   network-free namespace. **A red CI must mean our code broke, not that an
   undocumented API changed overnight.** Verified locally: 12 tests pass with no

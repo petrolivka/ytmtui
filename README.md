@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/petrolivka/ytmtui/actions/workflows/ci.yml/badge.svg)](https://github.com/petrolivka/ytmtui/actions/workflows/ci.yml)
 [![Licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue.svg)](LICENSE)
-[![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
 </div>
 
@@ -75,7 +75,7 @@ never sign in, and `--anonymous` forces it.
 
 | | |
 |---|---|
-| Rust | 1.85+ to build |
+| Rust | 1.88+ to build |
 | **`ffmpeg`** | **required** — does all audio decoding |
 | **`yt-dlp`** | **required** — resolves stream URLs |
 | Audio | PipeWire / PulseAudio / ALSA on Linux, CoreAudio on macOS |

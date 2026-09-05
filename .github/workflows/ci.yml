@@ -20,9 +20,10 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         rust: [stable]
         include:
-          # The MSRV is what Symphonia needs; a bump should be deliberate.
+          # The declared MSRV. A bump should be deliberate, so this job
+          # builds against it explicitly.
           - os: ubuntu-latest
-            rust: "1.85"
+            rust: "1.88"
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +32,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev pkg-config
+
+      # rust-toolchain.toml would otherwise override the toolchain installed
+      # below, so the MSRV job would silently build on stable and pass for the
+      # wrong reason.
+      - name: Drop the toolchain pin when testing a specific version
+        if: matrix.rust != 'stable'
+        run: rm -f rust-toolchain.toml
 
       - uses: dtolnay/rust-toolchain@master
         with:

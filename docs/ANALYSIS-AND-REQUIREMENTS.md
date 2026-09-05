@@ -418,7 +418,7 @@ The analyser runs on its own thread and publishes an immutable `SpectrumFrame` v
 | NFR-9 | **Security:** credentials 0600 or keyring; redacted logs; TLS verification never disabled; no telemetry |
 | NFR-10 | **Maintainability:** backend behind traits with recorded-fixture tests, so an InnerTube shape change is a contained fix |
 | NFR-11 | **Observability:** `tracing` spans, `--log-file`, `ytmtui doctor` self-check |
-| NFR-12 | **Build:** stable Rust (MSRV ≥ 1.85 per Symphonia), `cargo build` works with no system deps in the default feature set |
+| NFR-12 | **Build:** stable Rust (MSRV 1.88, set by ratatui, image and darling), `cargo build` works with no system deps in the default feature set |
 | **NFR-13** | **No subprocess may discard its stderr.** M0 proved the failure mode: a nulled ffmpeg stderr turned a hard error into a healthy-looking UI with an empty spectrum and no diagnostic anywhere. Drain it on a thread and surface it |
 
 ---

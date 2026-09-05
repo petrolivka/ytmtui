@@ -1,6 +1,8 @@
-# Pins the toolchain for anyone without mise. The version is the MSRV declared
-# in Cargo.toml; CI additionally builds against it explicitly so a bump has to
-# be deliberate.
+# Pins a toolchain for contributors who do not use mise.
+#
+# Note that this file overrides whatever toolchain CI installs, so the MSRV job
+# deletes it before building - otherwise that job silently tests stable and is
+# green for the wrong reason.
 [toolchain]
 channel = "stable"
 components = ["rustfmt", "clippy"]
