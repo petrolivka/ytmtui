@@ -22,10 +22,10 @@ fn open_device(name: &str) -> Result<rodio::MixerDeviceSink> {
     if name.is_empty() || name == "default" {
         return Ok(DeviceSinkBuilder::open_default_sink()?);
     }
-    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    use rodio::cpal::traits::HostTrait;
     let host = rodio::cpal::default_host();
     if let Ok(mut devices) = host.output_devices() {
-        if let Some(d) = devices.find(|d| d.name().map(|n| n == name).unwrap_or(false)) {
+        if let Some(d) = devices.find(|d| crate::device_name(d).as_deref() == Some(name)) {
             if let Ok(sink) = DeviceSinkBuilder::from_device(d).and_then(|b| b.open_stream()) {
                 return Ok(sink);
             }
