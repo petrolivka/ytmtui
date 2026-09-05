@@ -62,20 +62,72 @@ impl Tap {
 }
 
 /// Playback position of the currently running decoder.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Progress {
     frames: Arc<AtomicU64>,
     offset_secs: Arc<Mutex<f64>>,
+    /// Playback speed. At 1.25x, a second of output is 1.25 seconds of the
+    /// track, so position has to be scaled or the progress bar lies.
+    rate: Arc<Mutex<f64>>,
+}
+
+impl Default for Progress {
+    fn default() -> Self {
+        Self {
+            frames: Arc::new(AtomicU64::new(0)),
+            offset_secs: Arc::new(Mutex::new(0.0)),
+            rate: Arc::new(Mutex::new(1.0)),
+        }
+    }
 }
 
 impl Progress {
     pub fn seconds(&self) -> f64 {
-        self.frames.load(Ordering::Relaxed) as f64 / SAMPLE_RATE as f64
-            + *self.offset_secs.lock().unwrap()
+        let played = self.frames.load(Ordering::Relaxed) as f64 / SAMPLE_RATE as f64;
+        played * *self.rate.lock().unwrap() + *self.offset_secs.lock().unwrap()
+    }
+    pub fn set_rate(&self, rate: f64) {
+        *self.rate.lock().unwrap() = rate.max(0.01);
     }
     fn reset(&self, offset: f64) {
         self.frames.store(0, Ordering::Relaxed);
         *self.offset_secs.lock().unwrap() = offset;
+    }
+}
+
+/// Audio processing applied by ffmpeg while decoding.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Filters {
+    /// Even out loudness between tracks.
+    pub normalize: bool,
+    /// 0.5 to 2.0. Pitch is preserved, which a resampler would not do.
+    pub speed: f32,
+}
+
+impl Default for Filters {
+    fn default() -> Self {
+        Self { normalize: false, speed: 1.0 }
+    }
+}
+
+impl Filters {
+    /// The `-af` argument, or None when nothing needs doing.
+    fn to_arg(self) -> Option<String> {
+        let mut parts: Vec<String> = Vec::new();
+        if self.normalize {
+            // dynaudnorm, not loudnorm: loudnorm's dynamic mode buffers three
+            // seconds of lookahead, which would delay the start of every track.
+            parts.push("dynaudnorm=f=250:g=15:p=0.9".into());
+        }
+        if (self.speed - 1.0).abs() > 0.01 {
+            // atempo preserves pitch; one instance covers 0.5-2.0.
+            parts.push(format!("atempo={:.3}", self.speed.clamp(0.5, 2.0)));
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(","))
+        }
     }
 }
 
@@ -103,7 +155,20 @@ impl FfmpegPcm {
         progress: Progress,
         errors: Arc<Mutex<Vec<String>>>,
     ) -> Result<Self> {
+        Self::open_with(input, start, sink, progress, errors, Filters::default())
+    }
+
+    /// As `open`, with audio processing applied while decoding.
+    pub fn open_with(
+        input: &str,
+        start: f64,
+        sink: TapSink,
+        progress: Progress,
+        errors: Arc<Mutex<Vec<String>>>,
+        filters: Filters,
+    ) -> Result<Self> {
         progress.reset(start);
+        progress.set_rate(filters.speed.clamp(0.5, 2.0) as f64);
 
         let mut cmd = Command::new("ffmpeg");
         cmd.args(["-hide_banner", "-loglevel", "error"]);
@@ -120,9 +185,13 @@ impl FfmpegPcm {
             cmd.args(["-ss", &format!("{start:.3}")]);
         }
 
+        cmd.args(["-i", input]);
+        // Filters are output options, so they must follow the input.
+        if let Some(af) = filters.to_arg() {
+            cmd.args(["-af", &af]);
+        }
         let mut child = cmd
             .args([
-                "-i", input,
                 "-f", "f32le",
                 "-acodec", "pcm_f32le",
                 "-ar", &SAMPLE_RATE.to_string(),
@@ -292,4 +361,33 @@ impl Drop for FfmpegPcm {
 fn is_network_input(input: &str) -> bool {
     let l = input.to_ascii_lowercase();
     l.starts_with("http://") || l.starts_with("https://")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Filters;
+
+    #[test]
+    fn no_filters_means_no_argument() {
+        assert_eq!(Filters::default().to_arg(), None);
+        // A speed of exactly 1.0 is not a filter.
+        assert_eq!(Filters { normalize: false, speed: 1.0 }.to_arg(), None);
+    }
+
+    #[test]
+    fn builds_a_filter_chain() {
+        let f = Filters { normalize: true, speed: 1.25 };
+        let arg = f.to_arg().unwrap();
+        assert!(arg.contains("dynaudnorm"));
+        assert!(arg.contains("atempo=1.250"));
+        assert_eq!(arg.matches(',').count(), 1);
+    }
+
+    #[test]
+    fn speed_is_clamped_to_what_atempo_accepts() {
+        let arg = Filters { normalize: false, speed: 9.0 }.to_arg().unwrap();
+        assert!(arg.contains("atempo=2.000"), "got {arg}");
+        let arg = Filters { normalize: false, speed: 0.1 }.to_arg().unwrap();
+        assert!(arg.contains("atempo=0.500"), "got {arg}");
+    }
 }

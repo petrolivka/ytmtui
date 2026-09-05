@@ -179,6 +179,8 @@ pub struct PlayerStatus {
     pub volume: f32,
     pub repeat: RepeatMode,
     pub shuffle: bool,
+    pub speed: f32,
+    pub normalize: bool,
     pub queue: Vec<Track>,
     pub queue_index: usize,
     /// Last error, surfaced in the status bar rather than swallowed.

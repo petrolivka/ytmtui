@@ -104,3 +104,31 @@ mod tests {
         assert!(filter_actions("zzzqqq").is_empty());
     }
 }
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+
+    /// Every action must be reachable by typing its own label - otherwise the
+    /// palette silently cannot run it.
+    #[test]
+    fn every_action_is_findable_by_its_label() {
+        for a in Action::ALL {
+            let hits = filter_actions(a.label());
+            assert!(
+                hits.contains(a),
+                "{:?} ({}) is not findable by its own label; got {:?}",
+                a,
+                a.label(),
+                hits.iter().take(3).map(|x| x.label()).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn speed_actions_are_in_the_catalogue() {
+        assert!(Action::ALL.contains(&Action::SpeedUp), "SpeedUp missing from ALL");
+        assert!(Action::ALL.contains(&Action::ToggleNormalize), "ToggleNormalize missing");
+        assert!(Action::ALL.contains(&Action::ToggleArt), "ToggleArt missing");
+    }
+}

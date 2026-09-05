@@ -1277,6 +1277,25 @@ impl App {
                 self.player.send(PCmd::SetVolume(v));
             }
             ToggleShuffle => self.player.send(PCmd::ToggleShuffle),
+            SpeedUp => {
+                let v = (self.player.status().speed + 0.1).min(2.0);
+                self.player.send(PCmd::SetSpeed(v));
+                self.toast(format!("speed {v:.2}x"));
+            }
+            SpeedDown => {
+                let v = (self.player.status().speed - 0.1).max(0.5);
+                self.player.send(PCmd::SetSpeed(v));
+                self.toast(format!("speed {v:.2}x"));
+            }
+            SpeedReset => {
+                self.player.send(PCmd::SetSpeed(1.0));
+                self.toast("speed 1.00x".into());
+            }
+            ToggleNormalize => {
+                let on = !self.player.status().normalize;
+                self.player.send(PCmd::ToggleNormalize);
+                self.toast(format!("loudness levelling {}", if on { "on" } else { "off" }));
+            }
             CycleRepeat => self.player.send(PCmd::CycleRepeat),
             StartRadio => self.start_radio_from_selection(),
             ToggleAutoplay => {

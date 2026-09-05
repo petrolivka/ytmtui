@@ -52,7 +52,7 @@ pub fn reserve(area: Rect, buf: &mut Buffer) {
         for x in area.x..area.x + area.width {
             if let Some(c) = buf.cell_mut((x, y)) {
                 c.set_char(' ');
-                c.set_skip(true);
+                c.set_diff_option(ratatui::buffer::CellDiffOption::Skip);
             }
         }
     }

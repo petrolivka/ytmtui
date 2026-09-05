@@ -48,6 +48,12 @@ pub struct Audio {
     pub device: String,
     /// 0.0 - 1.5
     pub volume: f32,
+    /// Even out loudness between tracks.
+    pub normalize: bool,
+    /// Playback speed, 0.5 - 2.0. Pitch is preserved.
+    pub speed: f32,
+    /// Crossfade between tracks, in seconds. 0 keeps gapless handover.
+    pub crossfade_secs: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -134,7 +140,14 @@ impl Default for General {
 
 impl Default for Audio {
     fn default() -> Self {
-        Self { quality: Quality::High, device: "default".into(), volume: 1.0 }
+        Self {
+            quality: Quality::High,
+            device: "default".into(),
+            volume: 1.0,
+            normalize: false,
+            speed: 1.0,
+            crossfade_secs: 0.0,
+        }
     }
 }
 

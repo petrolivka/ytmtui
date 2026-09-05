@@ -598,8 +598,15 @@ fn draw_now_playing(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect)
     };
 
     let flags = format!(
-        "{}{}{}  {}{}  vol {:>3.0}%",
+        "{}{}{}{}{}  {}{}  vol {:>3.0}%",
         if app.autoplay { "" } else { "autoplay:off " },
+        if status.normalize { "norm " } else { "" },
+        // Only shown when it is not 1x, so the common case stays uncluttered.
+        if (status.speed - 1.0).abs() > 0.01 {
+            format!("{:.2}x ", status.speed)
+        } else {
+            String::new()
+        },
         if status.shuffle { "shuffle " } else { "" },
         status.repeat.glyph(),
         app.now.rating.glyph(),

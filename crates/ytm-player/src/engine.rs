@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use ytm_core::{PlayState, PlayerStatus, RepeatMode, Track};
 
-use crate::pcm::{self, FfmpegPcm, Progress, Tap, TapSink};
+use crate::pcm::{self, FfmpegPcm, Filters, Progress, Tap, TapSink};
 use crate::resolver::ResolverCache;
 
 /// Open a named output device, or the default. A configured device that has
@@ -56,6 +56,9 @@ pub enum Command {
     CycleRepeat,
     ToggleShuffle,
     Stop,
+    /// Playback speed, 0.5 to 2.0, pitch preserved.
+    SetSpeed(f32),
+    ToggleNormalize,
     Shutdown,
 }
 
@@ -87,6 +90,9 @@ pub fn spawn_on_device(resolver: Arc<ResolverCache>, device: &str) -> Result<(Pl
     let (tx, rx) = mpsc::channel();
     let status = Arc::new(ArcSwap::from_pointee(PlayerStatus {
         volume: 1.0,
+        // Not Default: a speed of 0.0 would render as "0.00x" before the
+        // engine publishes its first real status.
+        speed: 1.0,
         ..Default::default()
     }));
     // One tap for the app's lifetime: the analyser is never rewired on track
@@ -103,6 +109,7 @@ pub fn spawn_on_device(resolver: Arc<ResolverCache>, device: &str) -> Result<(Pl
                 Err(err) => {
                     status.store(Arc::new(PlayerStatus {
                         error: Some(format!("audio device unavailable: {err}")),
+                        speed: 1.0,
                         ..Default::default()
                     }));
                 }
@@ -126,6 +133,7 @@ struct Engine {
     repeat: RepeatMode,
     shuffle: bool,
     volume: f32,
+    filters: Filters,
     progress: Progress,
     /// The decoder for the *next* track, opened early and queued behind the
     /// current one so the handover has no gap (FR-P5).
@@ -160,6 +168,7 @@ impl Engine {
             repeat: RepeatMode::Off,
             shuffle: false,
             volume: 1.0,
+            filters: Filters::default(),
             progress: Progress::default(),
             armed: None,
             arming: None,
@@ -308,6 +317,17 @@ impl Engine {
                 }
                 self.disarm_and_correct();
             }
+            Command::SetSpeed(v) => {
+                let v = v.clamp(0.5, 2.0);
+                if (v - self.filters.speed).abs() > 0.001 {
+                    self.filters.speed = v;
+                    self.restart_in_place();
+                }
+            }
+            Command::ToggleNormalize => {
+                self.filters.normalize = !self.filters.normalize;
+                self.restart_in_place();
+            }
             Command::Stop => self.stop(),
             Command::Shutdown => {}
         }
@@ -356,10 +376,11 @@ impl Engine {
         let resolver = self.resolver.clone();
         let sink = self.sink.clone();
         let errors = self.errors.clone();
+        let filters = self.filters;
         std::thread::spawn(move || {
             let progress = Progress::default();
             let r = resolver.resolve(&track.id).and_then(|fmt| {
-                FfmpegPcm::open(&fmt.url, 0.0, sink, progress.clone(), errors)
+                FfmpegPcm::open_with(&fmt.url, 0.0, sink, progress.clone(), errors, filters)
                     .map(|src| (next_index, src, progress))
             });
             let _ = tx.send(r.map_err(|e| e.to_string()));
@@ -369,6 +390,22 @@ impl Engine {
     fn remaining_secs(&self) -> Option<f64> {
         let total = self.current_duration()?;
         Some((total - self.progress.seconds()).max(0.0))
+    }
+
+    /// Re-open the decoder at the current position, e.g. after changing a
+    /// filter. ffmpeg applies filters at open, so there is no way to change
+    /// them mid-stream.
+    fn restart_in_place(&mut self) {
+        if self.state == PlayState::Stopped {
+            return;
+        }
+        let at = self.progress.seconds();
+        let was_paused = self.state == PlayState::Paused;
+        self.start(at);
+        if was_paused {
+            self.player.pause();
+            self.state = PlayState::Paused;
+        }
     }
 
     /// Throw away a queued next decoder, e.g. after a skip or a seek.
@@ -416,12 +453,13 @@ impl Engine {
             }
         };
 
-        match FfmpegPcm::open(
+        match FfmpegPcm::open_with(
             &fmt.url,
             from,
             self.sink.clone(),
             self.progress.clone(),
             self.errors.clone(),
+            self.filters,
         ) {
             Ok(src) => {
                 self.player.append(src);
@@ -538,6 +576,8 @@ impl Engine {
             volume: self.volume,
             repeat: self.repeat,
             shuffle: self.shuffle,
+            speed: self.filters.speed,
+            normalize: self.filters.normalize,
             queue: self.queue.clone(),
             queue_index: self.index,
             error: self.error.clone(),

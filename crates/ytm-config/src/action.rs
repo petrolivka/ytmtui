@@ -38,6 +38,10 @@ pub enum Action {
     VolumeUp,
     VolumeDown,
     ToggleShuffle,
+    SpeedUp,
+    SpeedDown,
+    SpeedReset,
+    ToggleNormalize,
     CycleRepeat,
     StartRadio,
     ToggleAutoplay,
@@ -96,6 +100,10 @@ impl Action {
             VolumeUp => "Volume up",
             VolumeDown => "Volume down",
             ToggleShuffle => "Toggle shuffle",
+            SpeedUp => "Speed up",
+            SpeedDown => "Slow down",
+            SpeedReset => "Reset speed to 1x",
+            ToggleNormalize => "Toggle loudness levelling",
             CycleRepeat => "Cycle repeat mode",
             StartRadio => "Start radio from selection",
             ToggleAutoplay => "Toggle autoplay",
@@ -122,26 +130,10 @@ impl Action {
         }
     }
 
-    /// Everything offerable in the command palette, in a sensible order.
-    pub const ALL: &'static [Action] = {
-        use Action::*;
-        &[
-            Search, Activate, Back, TogglePause, Next, Prev, SeekForward, SeekBackward,
-            SeekForwardLong, SeekBackwardLong, VolumeUp, VolumeDown, ToggleShuffle, CycleRepeat,
-            StartRadio, ToggleAutoplay, PlayNext, Enqueue, RemoveFromQueue, ThumbsUp, ThumbsDown,
-            ToggleLibrary, AddToPlaylist, NewPlaylist, RenamePlaylist, DeletePlaylist,
-            RemoveFromPlaylist, ToggleSubscribe, CopyLink, GoToArtist, GoToAlbum,
-            NextTab, PrevTab, NextPane, PrevPane, CycleVisualizer, ToggleVisualizerFullscreen,
-            ToggleLyrics,
-    ToggleArt, CommandPalette, Help, Quit,
-        ]
-    };
-}
-
-impl Action {
-    /// The exact name accepted in the config file. Derived from the same serde
-    /// rename as the parser, so what `--list-actions` prints is always what
-    /// `[keys]` will accept.
+    /// The exact name accepted in the config file. Derived from the same
+    /// snake_case shape as the parser, and a test round-trips every one
+    /// through it - deriving from Debug instead printed "togglepause", which
+    /// the config would reject.
     pub fn name(self) -> String {
         let debug = format!("{self:?}");
         let mut out = String::with_capacity(debug.len() + 4);
@@ -157,6 +149,32 @@ impl Action {
         }
         out
     }
+
+    /// Every action, in the order the command palette offers them.
+    ///
+    /// This must list every variant: it is what the palette and
+    /// `--list-actions` enumerate, and a variant left out is simply
+    /// unreachable from either. A test checks that everything bound by the
+    /// default keymap appears here.
+    pub const ALL: &'static [Action] = {
+        use Action::*;
+        &[
+            Search, Activate, Back,
+            TogglePause, Next, Prev,
+            SeekForward, SeekBackward, SeekForwardLong, SeekBackwardLong,
+            VolumeUp, VolumeDown,
+            ToggleShuffle, CycleRepeat, StartRadio, ToggleAutoplay,
+            SpeedUp, SpeedDown, SpeedReset, ToggleNormalize,
+            PlayNext, Enqueue, RemoveFromQueue,
+            ThumbsUp, ThumbsDown, ToggleLibrary,
+            AddToPlaylist, NewPlaylist, RenamePlaylist, DeletePlaylist,
+            RemoveFromPlaylist, ToggleSubscribe, CopyLink,
+            GoToArtist, GoToAlbum, NextTab, PrevTab,
+            NextPane, PrevPane, Up, Down, PageUp, PageDown, Top, Bottom,
+            CycleVisualizer, ToggleVisualizerFullscreen, ToggleLyrics, ToggleArt,
+            CommandPalette, Help, Quit,
+        ]
+    };
 }
 
 impl fmt::Display for Action {
@@ -173,6 +191,27 @@ mod tests {
     /// Whatever `--list-actions` prints must be parseable by `[keys]`.
     /// Deriving the name from Debug instead gave "togglepause", which the
     /// config would then reject.
+    /// A variant missing from ALL is unreachable from the command palette and
+    /// from --list-actions. This caught SpeedUp and friends being added to the
+    /// enum but not to the catalogue.
+    #[test]
+    fn every_bound_action_is_in_the_catalogue() {
+        for (chord, action) in crate::default_keymap() {
+            assert!(
+                Action::ALL.contains(&action),
+                "{action:?} (bound to {chord}) is missing from Action::ALL"
+            );
+        }
+    }
+
+    #[test]
+    fn catalogue_has_no_duplicates() {
+        let mut seen = std::collections::HashSet::new();
+        for a in Action::ALL {
+            assert!(seen.insert(*a), "{a:?} listed twice in Action::ALL");
+        }
+    }
+
     #[test]
     fn every_action_name_round_trips() {
         for a in Action::ALL {
