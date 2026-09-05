@@ -318,11 +318,9 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("\u{2588}", Style::default().fg(app.theme.accent)),
         ])
     } else {
-        // Breadcrumb, so it is obvious how deep the navigation went.
-        let mut spans = vec![
-            Span::styled("ytmtui", Style::default().fg(app.theme.accent).bold()),
-            Span::styled("  ", Style::default()),
-        ];
+        // Breadcrumb only. The application name belongs in the block title, and
+        // repeating it inside the same box reads as a mistake.
+        let mut spans: Vec<Span> = Vec::new();
         for (i, p) in app.stack.iter().enumerate() {
             if i > 0 {
                 spans.push(Span::styled(
@@ -333,7 +331,13 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
             let last = i + 1 == app.stack.len();
             spans.push(Span::styled(
                 p.view.title(),
-                Style::default().fg(if last { app.theme.fg } else { app.theme.dim }),
+                // The current view is the emphasised one; the trail behind it
+                // is context, so it recedes.
+                if last {
+                    Style::default().fg(app.theme.accent).bold()
+                } else {
+                    Style::default().fg(app.theme.dim)
+                },
             ));
         }
         if !app.backend.is_authenticated() {
