@@ -273,6 +273,23 @@ mod doctor {
             );
         }
 
+        println!("\nalbum art:");
+        let loaded_cfg = ytm_config::load();
+        let chosen = ytm_art::Backend::parse(&loaded_cfg.config.art.backend)
+            .unwrap_or_else(ytm_art::Backend::detect);
+        ok(
+            "backend",
+            format!(
+                "{} (art.backend = \"{}\")",
+                chosen.name(),
+                loaded_cfg.config.art.backend
+            ),
+        );
+        if chosen == ytm_art::Backend::HalfBlock {
+            println!("      half blocks work in every terminal; set art.backend to");
+            println!("      \"sixel\" or \"kitty\" if yours supports one of those");
+        }
+
         println!("\nconfig:");
         let loaded = ytm_config::load();
         match &loaded.path {

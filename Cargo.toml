@@ -80,6 +80,7 @@ ytm-tui = { path = "crates/ytm-tui" }
 anyhow.workspace = true
 serde_json.workspace = true
 ytm-config = { path = "crates/ytm-config" }
+ytm-art = { path = "crates/ytm-art" }
 rodio.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

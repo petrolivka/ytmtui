@@ -24,11 +24,24 @@ pub use app::App;
 /// frame, positioned by hand over cells the renderer was told to skip.
 fn draw_graphics_cover(app: &App) -> Result<()> {
     use std::io::Write;
+    // Fullscreen draws the spectrum alone. Without this the image would keep
+    // being painted at the position the cover pane had before, because these
+    // escapes bypass the renderer and nothing else erases them.
+    // Every path that declines to draw must also forget what was painted:
+    // whatever replaced the image - the fullscreen spectrum, a dialogue - has
+    // erased it, so it has to be sent again when we come back.
+    let mut forget = || *app.hit.painted.borrow_mut() = None;
+
     if !app.show_art || !cover::is_graphics(app.art_backend) {
+        return Ok(());
+    }
+    if app.viz_fullscreen || app.modal.is_some() || app.show_help {
+        forget();
         return Ok(());
     }
     let area = app.hit.cover.get();
     if area.width == 0 || area.height == 0 {
+        forget();
         return Ok(());
     }
     let Some(url) = app
@@ -38,6 +51,7 @@ fn draw_graphics_cover(app: &App) -> Result<()> {
         .as_ref()
         .and_then(|t| t.thumbnail.clone())
     else {
+        forget();
         return Ok(());
     };
     let want = ytm_art::at_size(
@@ -49,6 +63,13 @@ fn draw_graphics_cover(app: &App) -> Result<()> {
     let Some(img) = app.art_cache.get(&want) else {
         return Ok(());
     };
+
+    // Redraw only when the image or its position actually changed. These
+    // escapes are not part of the frame diff, so nothing erases them in the
+    // meantime and repeating them every frame buys nothing.
+    if app.hit.painted.borrow().as_ref() == Some(&(want.clone(), area)) {
+        return Ok(());
+    }
 
     let mut out = std::io::stdout().lock();
     // Save the cursor, position it over the pane, draw, restore.
@@ -67,6 +88,7 @@ fn draw_graphics_cover(app: &App) -> Result<()> {
     }
     write!(out, "\x1b8")?;
     out.flush()?;
+    *app.hit.painted.borrow_mut() = Some((want, area));
     Ok(())
 }
 

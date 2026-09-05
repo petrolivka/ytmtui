@@ -3955,6 +3955,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ytm-api",
+ "ytm-art",
  "ytm-config",
  "ytm-core",
  "ytm-player",

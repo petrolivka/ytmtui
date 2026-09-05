@@ -84,6 +84,10 @@ pub struct Hitboxes {
     /// Inner area of the cover pane, for fetching at the right size and for
     /// positioning graphics escapes.
     pub cover: Cell<Rect>,
+    /// What the graphics backend last painted, so an unchanged image is not
+    /// re-encoded and re-sent every frame. At 60 fps that is a lot of bytes
+    /// down a terminal, and it flickers over a slow link.
+    pub painted: RefCell<Option<(String, Rect)>>,
 }
 
 /// List scroll offsets, owned here rather than rebuilt per frame, so a click

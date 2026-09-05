@@ -12,7 +12,7 @@ use image::imageops::FilterType;
 use image::RgbImage;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How to draw an image in this terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,8 +165,15 @@ use image::ImageEncoder;
 pub struct ArtCache {
     http: reqwest::blocking::Client,
     images: Mutex<HashMap<String, Option<RgbImage>>>,
+    /// When each URL last failed. Failures are remembered so a broken URL is
+    /// not retried every frame, but not forever: a transient network error
+    /// would otherwise blank that track's cover for the rest of the session.
+    failed_at: Mutex<HashMap<String, Instant>>,
     capacity: usize,
 }
+
+/// How long a failed fetch is left alone before being tried again.
+const RETRY_AFTER: Duration = Duration::from_secs(30);
 
 impl ArtCache {
     pub fn new() -> Result<Self> {
@@ -175,6 +182,7 @@ impl ArtCache {
                 .timeout(Duration::from_secs(10))
                 .build()?,
             images: Mutex::new(HashMap::new()),
+            failed_at: Mutex::new(HashMap::new()),
             capacity: 24,
         })
     }
@@ -214,6 +222,9 @@ impl ArtCache {
                 }
                 Err(e) => {
                     m.insert(url.to_string(), None);
+                    if let Ok(mut f) = self.failed_at.lock() {
+                        f.insert(url.to_string(), Instant::now());
+                    }
                     Err(e)
                 }
             }

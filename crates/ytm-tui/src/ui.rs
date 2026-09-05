@@ -45,6 +45,9 @@ pub fn draw(f: &mut Frame, app: &App) {
     let status = app.player.status();
 
     if app.viz_fullscreen {
+        // No cover pane exists in this layout; leaving its old rect in place
+        // would have the art keep fetching, and drawing, at that position.
+        app.hit.cover.set(Rect::default());
         let [main, now] = Layout::vertical([Constraint::Min(3), Constraint::Length(4)]).areas(area);
         draw_spectrum(f, app, main);
         draw_now_playing(f, app, &status, now);
