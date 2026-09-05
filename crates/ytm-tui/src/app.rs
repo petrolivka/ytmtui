@@ -128,6 +128,10 @@ pub struct App {
     /// Last-seen config mtime, for hot-reload (FR-C1).
     config_mtime: Option<std::time::SystemTime>,
     config_checked: Instant,
+    scrobbler: Option<Arc<ytm_api::listenbrainz::Scrobbler>>,
+    /// Which track the pending scrobble is for, when it started, and whether
+    /// the listen has been submitted yet.
+    scrobble: Option<(VideoId, u64, bool)>,
     history_pos: Option<usize>,
     /// Lyrics for the track they belong to, so a stale fetch is never shown
     /// against the wrong song.
@@ -211,6 +215,8 @@ impl App {
             suggest_for: String::new(),
             config_mtime: config_mtime(),
             config_checked: Instant::now(),
+            scrobbler: None,
+            scrobble: None,
             history_pos: None,
             lyrics: None,
             lyrics_synced: None,
@@ -515,6 +521,7 @@ impl App {
         let c = self.hit.cover.get();
         self.ensure_art(c.width, c.height);
         self.sample_spectrum();
+        self.poll_scrobble();
         self.poll_config();
         self.poll_suggestions();
         self.maybe_autoplay();
@@ -539,6 +546,7 @@ impl App {
         self.lyrics_synced = None;
         self.lyrics_scroll = 0;
         self.notify_track_change();
+        self.start_scrobble();
         self.art_cells.clear();
         self.art_for = None;
         if self.show_lyrics {
@@ -556,6 +564,47 @@ impl App {
                     id.clone(),
                     TrackState { id: Some(id), rating, in_library, token_add: add, token_remove: remove },
                 ));
+            }
+        });
+    }
+
+    /// Tell ListenBrainz what is on, and arm the listen for later.
+    fn start_scrobble(&mut self) {
+        let Some(sc) = self.scrobbler.clone() else { return };
+        let Some(t) = self.player.status().current.clone() else {
+            self.scrobble = None;
+            return;
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.scrobble = Some((t.id.clone(), now, false));
+        std::thread::spawn(move || {
+            if let Err(e) = sc.playing_now(&t.artist, &t.title, t.album.as_deref()) {
+                tracing::warn!("playing_now failed: {e}");
+            }
+        });
+    }
+
+    /// Submit the listen once enough of the track has played.
+    fn poll_scrobble(&mut self) {
+        let Some(sc) = self.scrobbler.clone() else { return };
+        let st = self.player.status();
+        let Some(t) = st.current.clone() else { return };
+        let Some((id, started, submitted)) = self.scrobble.clone() else { return };
+        if submitted || id != t.id {
+            return;
+        }
+        if !ytm_api::listenbrainz::should_submit(st.position, t.duration) {
+            return;
+        }
+        self.scrobble = Some((id, started, true));
+        std::thread::spawn(move || {
+            if let Err(e) = sc.listen(&t.artist, &t.title, t.album.as_deref(), started) {
+                tracing::warn!("scrobble failed: {e}");
+            } else {
+                tracing::info!("scrobbled {} - {}", t.artist, t.title);
             }
         });
     }

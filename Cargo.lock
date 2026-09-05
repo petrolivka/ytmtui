@@ -3928,6 +3928,7 @@ dependencies = [
  "ratatui",
  "serde",
  "serde_json",
+ "tracing",
  "unicode-width",
  "ytm-api",
  "ytm-art",

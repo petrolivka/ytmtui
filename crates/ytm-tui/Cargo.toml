@@ -12,6 +12,7 @@ ytm-viz = { path = "../ytm-viz" }
 ytm-config = { path = "../ytm-config" }
 ytm-art = { path = "../ytm-art" }
 anyhow.workspace = true
+tracing.workspace = true
 ratatui.workspace = true
 arc-swap.workspace = true
 unicode-width = "0.2"

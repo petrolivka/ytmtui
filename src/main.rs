@@ -10,6 +10,11 @@ ytmtui - a YouTube Music client for the terminal
 
 USAGE:
     ytmtui [OPTIONS]
+    ytmtui <COMMAND>        control a running instance over its socket
+
+COMMANDS:
+    status [--json] next prev playpause play pause stop shuffle repeat
+    seek <secs>  volume [0-1.5]  speed [0.5-2.0]
 
 OPTIONS:
     -h, --help          show this help
@@ -34,6 +39,45 @@ fn main() -> Result<()> {
             .and_then(|i| args.get(i + 1))
             .cloned()
     };
+
+    // Talking to a running instance: `ytmtui next`, `ytmtui status --json`.
+    // Checked before anything else so it never starts a second player.
+    const IPC: &[&str] = &[
+        "status", "next", "prev", "previous", "playpause", "toggle", "play", "pause", "stop",
+        "seek", "volume", "speed", "shuffle", "repeat",
+    ];
+    if let Some(first) = args.first() {
+        if IPC.contains(&first.as_str()) {
+            let line = args
+                .iter()
+                .filter(|a| a.as_str() != "--json")
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" ");
+            return match ytm_player::ipc::send(&line) {
+                Ok(reply) => {
+                    println!("{reply}");
+                    if reply.starts_with("error:") {
+                        std::process::exit(1);
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("no running ytmtui to talk to ({e})");
+                    std::process::exit(1);
+                }
+            };
+        }
+    }
+
+    // A bare word that is not a known command would otherwise fall through and
+    // try to start a second player, which is a confusing way to report a typo.
+    if let Some(first) = args.first() {
+        if !first.starts_with('-') {
+            eprintln!("unknown command '{first}'\n\n{USAGE}");
+            std::process::exit(2);
+        }
+    }
 
     if has("-h") || has("--help") {
         print!("{USAGE}");
@@ -131,6 +175,13 @@ fn main() -> Result<()> {
             None
         }
     };
+
+    // Best-effort, like MPRIS: a socket that cannot be bound costs scripting,
+    // not startup.
+    #[cfg(unix)]
+    if let Err(e) = ytm_player::ipc::serve(player.clone()) {
+        tracing::warn!("control socket unavailable: {e}");
+    }
 
     ytm_tui::run(backend, player, tap, config)
 }

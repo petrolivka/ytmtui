@@ -3,6 +3,7 @@
 
 pub mod innertube;
 pub mod json;
+pub mod listenbrainz;
 pub mod lrclib;
 pub mod parse;
 

@@ -9,6 +9,7 @@
 | Owner | petr |
 | Scope | Product analysis, feature brainstorm, functional & non-functional requirements, architecture proposal, roadmap |
 | Out of scope | Implementation, detailed API schemas, test plans |
+| M4 results | [M4-STATUS.md](./M4-STATUS.md) — **delight complete**, album art included |
 | M3 results | [M3-STATUS.md](./M3-STATUS.md) — **polish complete**; all `S` requirements met bar two, listed with reasons |
 | M2 results | [M2-STATUS.md](./M2-STATUS.md) — **parity core complete**; a listening session needs no browser |
 | M1 results | [M1-STATUS.md](./M1-STATUS.md) — **skeleton player complete**; spike promoted to `crates/` |
@@ -200,12 +201,12 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 | FR-P3 | Volume 0–150 % with a soft limiter above 100 %, plus mute toggle | M |
 | FR-P4 | Repeat modes: off → all → one; Shuffle on/off (Fisher-Yates over the queue, preserving the current track) | M |
 | FR-P5 | ✅ **Gapless playback** between consecutive tracks (prefetch + decode-ahead of the next item) | S |
-| FR-P6 | Crossfade, configurable 0–12 s | C |
-| FR-P7 | Playback speed 0.5×–2.0× with pitch preserved | C |
+| FR-P6 | ✅ Crossfade, configurable 0–12 s | C |
+| FR-P7 | ✅ Playback speed 0.5×–2.0× with pitch preserved | C |
 | FR-P8 | ✅ Audio quality selector: Low / Normal / High / Auto-by-bandwidth, mapped to itags | S |
 | FR-P9 | ✅ Output device selection (list ALSA/Pulse/Pipewire/CoreAudio sinks); survives device disappearance | S |
 | FR-P10 | Robust buffering: prefetch window, stall detection, automatic retry with exponential backoff, resume at the same offset | M |
-| FR-P11 | Normalisation / ReplayGain-style loudness levelling using the stream's loudnessDb | C |
+| FR-P11 | ✅ Normalisation / ReplayGain-style loudness levelling using the stream's loudnessDb | C |
 | **FR-P12** | **Resolve stream URLs ahead of need**: resolve the next queue item during the current track, cache resolved URLs until their `expire`, spinner on unavoidable cold resolve. Measured yt-dlp cold resolve = **3.4 s**, far too slow to sit in the interactive path | **M** |
 
 ### 6.6 Queue, radio & autoplay
@@ -237,7 +238,7 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 | ID | Requirement | Pri |
 |---|---|---|
 | FR-Y1 | ✅ Plain lyrics panel via `music_lyrics` | S |
-| FR-Y2 | Time-synced lyrics with the active line highlighted and auto-scroll, when a synced source is available (e.g. LRCLIB as a supplementary provider) | C |
+| FR-Y2 | ✅ Time-synced lyrics with the active line highlighted and auto-scroll, when a synced source is available (e.g. LRCLIB as a supplementary provider) | C |
 | FR-Y3 | ✅ Graceful "no lyrics available" state | S |
 
 ### 6.9 Visualisation — *the differentiator* (detailed in §7)
@@ -252,8 +253,8 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 | FR-V6 | High-resolution glyph rendering: **braille / octant / sextant / half-block**, auto-selected from detected font capability, user-overridable | M |
 | FR-V7 | Visualiser can be resized, moved to full-screen (`z`), or disabled entirely (CPU saving) | M |
 | FR-V8 | Audio/visual alignment: visual frames delayed to compensate for output-device latency so bars match what is *heard* | S |
-| FR-V9 | Beat/onset detection driving accent effects (colour pulse, border flash) | C |
-| FR-V10 | Optional album art via Kitty/iTerm2/Sixel graphics protocols as an *alternative* pane, for users who want it | C |
+| FR-V9 | ✅ Beat/onset detection driving accent effects (colour pulse, border flash) | C |
+| FR-V10 | ✅ Optional album art via Kitty/iTerm2/Sixel graphics protocols as an *alternative* pane, for users who want it | C |
 
 ### 6.10 Interface & interaction
 
@@ -275,9 +276,9 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 |---|---|---|
 | FR-I1 | ✅ **MPRIS2** D-Bus interface on Linux (playerctl, media keys, desktop widgets) | S |
 | FR-I2 | Media-key handling on macOS/Windows | C |
-| FR-I3 | Desktop notification on track change (configurable) | C |
-| FR-I4 | Discord Rich Presence / scrobbling to Last.fm or ListenBrainz | C |
-| FR-I5 | CLI subcommands for scripting: `ytmtui play <query>`, `next`, `status --json` (IPC to a running instance) | C |
+| FR-I3 | ✅ Desktop notification on track change (configurable) | C |
+| FR-I4 | ✅ Discord Rich Presence / scrobbling to Last.fm or ListenBrainz | C |
+| FR-I5 | ✅ CLI subcommands for scripting: `ytmtui play <query>`, `next`, `status --json` (IPC to a running instance) | C |
 
 ### 6.12 Configuration, cache & diagnostics
 
@@ -600,7 +601,7 @@ All remappable; the help overlay is generated from the active map so it never dr
 | **M1 — Skeleton player** ✅ | Workspace, search → play → pause/seek/volume, queue, real visualiser wired to real audio | **Met.** Verified incl. 9 live SIGWINCH resizes. Ratings pulled forward from M2. See [M1-STATUS.md](./M1-STATUS.md) |
 | **M2 — Parity core (v1.0)** ✅ | Home, Library, Liked, artist/album/playlist pages, **thumbs up/down + library toggle**, radio/autoplay, shuffle/repeat, history, help overlay, themes, error toasts | **Met** for the acceptance test: a full listening session needs no browser. On-disk audio cache (FR-C2) deferred with reasons — see [M2-STATUS.md](./M2-STATUS.md) |
 | **M3 — Polish (v1.1)** ✅ | Gapless, MPRIS, lyrics, playlist editing, command palette, mouse, session restore, `doctor` | **Met** except FR-A2 (keyring) and FR-B2 (moods & genres), both deferred with reasons in [M3-STATUS.md](./M3-STATUS.md) |
-| **M4 — Delight (v1.2)** | Spectrogram mode, beat detection, crossfade, synced lyrics, Sixel art, scrobbling, CLI/IPC | Selected `C` items |
+| **M4 — Delight (v1.2)** ✅ | Spectrogram mode, beat detection, crossfade, synced lyrics, Sixel art, scrobbling, CLI/IPC | **Met** — all of them, plus album art. See [M4-STATUS.md](./M4-STATUS.md) |
 | **M5 — Hardening** | Fixture test suite for backend shapes, fuzz the parsers, packaging (AUR, brew, cargo-binstall), CI matrix | Reproducible releases |
 
 **Suggested build order rationale:** M0 front-loads every risk that could kill the project (stream access, codec, visualiser feasibility) before any UI investment. `ytm-viz` first also means the signature feature gets tuned with a fast local feedback loop rather than being rushed at the end.

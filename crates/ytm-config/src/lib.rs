@@ -22,6 +22,7 @@ pub struct Config {
     pub audio: Audio,
     pub visualizer: Visualizer,
     pub art: Art,
+    pub scrobble: Scrobble,
     pub theme: Theme,
     /// Binding -> action, e.g. `"ctrl+n" = "next"`. Merged over the defaults,
     /// so a user only has to list what they want to change.
@@ -98,6 +99,15 @@ pub struct Visualizer {
     pub max_fps: u32,
     /// Columns per band; 2 leaves a gutter between bars.
     pub bar_step: u16,
+}
+
+/// Scrobbling to ListenBrainz.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct Scrobble {
+    pub enabled: bool,
+    /// From https://listenbrainz.org/profile/ - treat it as a password.
+    pub listenbrainz_token: String,
 }
 
 /// Album art beside the spectrum.
@@ -188,6 +198,7 @@ impl Default for Config {
             audio: Audio::default(),
             visualizer: Visualizer::default(),
             art: Art::default(),
+            scrobble: Scrobble::default(),
             theme: Theme::default(),
             keys: HashMap::new(),
         }

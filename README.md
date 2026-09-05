@@ -16,11 +16,11 @@ spectrum where the album art would be.
 ╰───────────────────────────────────────────────────────────────────────────────╯
 ```
 
-**Status: M3 (polish).** Everything in M2 plus gapless playback, MPRIS (media
-keys and playerctl), lyrics, playlist editing, a command palette, mouse support,
-session restore, search suggestions and history, a config file with themes and
-fully remappable keys, and `--doctor`. See the
-[roadmap](docs/ANALYSIS-AND-REQUIREMENTS.md#13-roadmap) for what is left.
+**Status: M4 (delight).** Everything in M3 plus **album art** (half-block,
+sixel or Kitty), a spectrogram mode, beat-driven accents, crossfade,
+pitch-preserving playback speed, loudness levelling, time-synced lyrics,
+desktop notifications, ListenBrainz scrobbling, and a control socket for
+scripting. See the [roadmap](docs/ANALYSIS-AND-REQUIREMENTS.md#13-roadmap).
 
 ## ⚠️ Read this before signing in
 
@@ -111,11 +111,25 @@ than throwing the whole config away.
 | `g` / `G` | go to artist / album | | `9` / `0` | volume down / up |
 | `o` / `e` | play next / queue at end | | `v` / `z` | visualiser style / fullscreen |
 | `x` | remove from queue | | `?` / `q` | help / quit |
-| `Space`, `n`/`p`, `←`/`→` | play/pause, next/prev, seek (Shift: 30s) | | `L` | lyrics |
+| `Space`, `n`/`p`, `←`/`→` | play/pause, next/prev, seek (Shift: 30s) | | `L` / `c` | lyrics / album art |
 | `:` | command palette | | `P` / `N` | add to playlist / new playlist |
 
 Thumbs up adds to **Liked Songs**; it does *not* add to your library. Those are
 genuinely different operations in YouTube Music, and ytmtui keeps them distinct.
+
+## Scripting
+
+A running instance listens on a control socket, so a status bar or a keybinding
+can drive it:
+
+```bash
+ytmtui status --json    # {"state":"playing","title":"Roygbiv",...}
+ytmtui next             # also: prev playpause play pause stop shuffle repeat
+ytmtui seek -10         # seconds, relative
+ytmtui volume 0.4       # omit the value to read it back
+```
+
+MPRIS is published too, so `playerctl` and media keys work without any of this.
 
 ## Tools
 

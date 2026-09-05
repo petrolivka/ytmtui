@@ -56,6 +56,8 @@ pub enum Command {
     CycleRepeat,
     ToggleShuffle,
     Stop,
+    /// Overlap between tracks, in seconds. Zero restores gapless handover.
+    SetCrossfade(f32),
     /// Playback speed, 0.5 to 2.0, pitch preserved.
     SetSpeed(f32),
     ToggleNormalize,
@@ -121,7 +123,16 @@ pub fn spawn_on_device(resolver: Arc<ResolverCache>, device: &str) -> Result<(Pl
 
 struct Engine {
     _device: rodio::MixerDeviceSink,
-    player: Player,
+    /// Two players on one mixer. Crossfading needs both playing at once, which
+    /// a single queue cannot do; with crossfade off only `active` is ever used
+    /// and the behaviour is exactly the gapless path.
+    players: [Player; 2],
+    active: usize,
+    /// Seconds of overlap between tracks. Zero keeps gapless handover.
+    crossfade: f32,
+    /// The fade in progress: the queue index being faded in, its progress, and
+    /// when the fade started.
+    fading: Option<(usize, Progress, Instant)>,
     resolver: Arc<ResolverCache>,
     sink: TapSink,
     errors: Arc<Mutex<Vec<String>>>,
@@ -154,10 +165,16 @@ impl Engine {
         device_name: &str,
     ) -> Result<Self> {
         let device = open_device(device_name)?;
-        let player = Player::connect_new(device.mixer());
+        let players = [
+            Player::connect_new(device.mixer()),
+            Player::connect_new(device.mixer()),
+        ];
         Ok(Self {
             _device: device,
-            player,
+            players,
+            active: 0,
+            crossfade: 0.0,
+            fading: None,
             resolver,
             sink,
             errors,
@@ -178,6 +195,16 @@ impl Engine {
         })
     }
 
+    /// The player currently carrying the track being listened to.
+    fn player(&self) -> &Player {
+        &self.players[self.active]
+    }
+
+    /// The other player, used for the incoming track during a crossfade.
+    fn other(&self) -> &Player {
+        &self.players[1 - self.active]
+    }
+
     fn run(&mut self, rx: Receiver<Command>) {
         loop {
             // Drain every pending command before doing any work.
@@ -189,7 +216,11 @@ impl Engine {
                     Err(mpsc::TryRecvError::Disconnected) => return,
                 }
             }
-            self.poll_gapless();
+            if self.crossfade > 0.0 {
+                self.poll_crossfade();
+            } else {
+                self.poll_gapless();
+            }
             self.poll_track_end();
             self.drain_decoder_errors();
             self.publish();
@@ -236,7 +267,7 @@ impl Engine {
                 self.queue = tracks;
                 self.index = index.min(self.queue.len() - 1);
                 self.start(position);
-                self.player.pause();
+                self.player().pause();
                 self.state = PlayState::Paused;
             }
             Command::JumpTo(i) => {
@@ -265,11 +296,16 @@ impl Engine {
             }
             Command::TogglePause => match self.state {
                 PlayState::Playing => {
-                    self.player.pause();
+                    // Both, or a fading-in track would keep playing.
+                    self.players[0].pause();
+                    self.players[1].pause();
                     self.state = PlayState::Paused;
                 }
                 PlayState::Paused => {
-                    self.player.play();
+                    self.player().play();
+                    if self.fading.is_some() {
+                        self.other().play();
+                    }
                     self.state = PlayState::Playing;
                 }
                 _ => {}
@@ -302,7 +338,10 @@ impl Engine {
             }
             Command::SetVolume(v) => {
                 self.volume = v.clamp(0.0, 1.5);
-                self.player.set_volume(self.volume);
+                // During a fade the ramp owns the volumes; it will pick this up.
+                if self.fading.is_none() {
+                    self.player().set_volume(self.volume);
+                }
             }
             Command::CycleRepeat => {
                 self.repeat = self.repeat.next();
@@ -316,6 +355,12 @@ impl Engine {
                     self.shuffle_tail();
                 }
                 self.disarm_and_correct();
+            }
+            Command::SetCrossfade(v) => {
+                self.crossfade = v.clamp(0.0, 12.0);
+                // Switching modes mid-track would leave one path half armed.
+                self.disarm();
+                self.cancel_fade();
             }
             Command::SetSpeed(v) => {
                 let v = v.clamp(0.5, 2.0);
@@ -347,7 +392,7 @@ impl Engine {
                     self.arming = None;
                     // Still valid? A skip or seek may have moved on meanwhile.
                     if self.state == PlayState::Playing && self.index + 1 == index {
-                        self.player.append(src);
+                        self.player().append(src);
                         self.armed = Some((index, progress));
                     }
                 }
@@ -387,6 +432,92 @@ impl Engine {
         });
     }
 
+    /// Start the next track on the other player and ramp between them.
+    ///
+    /// Two players are needed because a crossfade means both tracks audible at
+    /// once, which a single sequential queue cannot express.
+    fn poll_crossfade(&mut self) {
+        // A decoder finished opening: begin the ramp.
+        if self.fading.is_none() {
+            if let Some(rx) = &self.arming {
+                match rx.try_recv() {
+                    Ok(Ok((index, src, progress))) => {
+                        self.arming = None;
+                        if self.state == PlayState::Playing && self.index + 1 == index {
+                            self.other().set_volume(0.0);
+                            self.other().append(src);
+                            self.other().play();
+                            self.fading = Some((index, progress, Instant::now()));
+                        }
+                    }
+                    Ok(Err(_)) => self.arming = None,
+                    Err(mpsc::TryRecvError::Disconnected) => self.arming = None,
+                    Err(mpsc::TryRecvError::Empty) => {}
+                }
+            }
+        }
+
+        // A fade in flight: drive the ramp.
+        if let Some((index, progress, started)) = self.fading.clone() {
+            let t = (started.elapsed().as_secs_f32() / self.crossfade).clamp(0.0, 1.0);
+            self.players[self.active].set_volume(self.volume * (1.0 - t));
+            self.players[1 - self.active].set_volume(self.volume * t);
+            if t >= 1.0 {
+                self.players[self.active].clear();
+                self.players[self.active].set_volume(self.volume);
+                self.active = 1 - self.active;
+                self.index = index;
+                self.progress = progress;
+                self.fading = None;
+                self.started = Some(Instant::now());
+                self.prefetch_next();
+            }
+            return;
+        }
+
+        if self.state != PlayState::Playing
+            || self.repeat == RepeatMode::One
+            || self.arming.is_some()
+        {
+            return;
+        }
+        let Some(remaining) = self.remaining_secs() else { return };
+        // Start opening early enough that the decoder is ready when the fade
+        // should begin, rather than after it.
+        if remaining > self.crossfade as f64 + 4.0 {
+            return;
+        }
+        let next_index = self.index + 1;
+        let Some(track) = self.queue.get(next_index).cloned() else { return };
+
+        // Resolving and opening take a second or more. Doing that here would
+        // stall the engine thread, and with it the ramp itself - the fade would
+        // jump rather than glide. Open in the background and start the ramp
+        // when it lands, exactly as the gapless path does.
+        let (tx, rx) = mpsc::channel();
+        self.arming = Some(rx);
+        let resolver = self.resolver.clone();
+        let sink = self.sink.clone();
+        let errors = self.errors.clone();
+        let filters = self.filters;
+        std::thread::spawn(move || {
+            let progress = Progress::default();
+            let r = resolver.resolve(&track.id).and_then(|fmt| {
+                FfmpegPcm::open_with(&fmt.url, 0.0, sink, progress.clone(), errors, filters)
+                    .map(|src| (next_index, src, progress))
+            });
+            let _ = tx.send(r.map_err(|e| e.to_string()));
+        });
+    }
+
+    fn cancel_fade(&mut self) {
+        if self.fading.take().is_some() {
+            self.other().clear();
+            self.other().set_volume(self.volume);
+            self.players[self.active].set_volume(self.volume);
+        }
+    }
+
     fn remaining_secs(&self) -> Option<f64> {
         let total = self.current_duration()?;
         Some((total - self.progress.seconds()).max(0.0))
@@ -403,7 +534,7 @@ impl Engine {
         let was_paused = self.state == PlayState::Paused;
         self.start(at);
         if was_paused {
-            self.player.pause();
+            self.player().pause();
             self.state = PlayState::Paused;
         }
     }
@@ -432,7 +563,8 @@ impl Engine {
     /// Begin (or restart) the current track at `from` seconds.
     fn start(&mut self, from: f64) {
         self.disarm();
-        self.player.clear();
+        self.cancel_fade();
+        self.player().clear();
         self.started = None;
         self.error = None;
 
@@ -462,9 +594,9 @@ impl Engine {
             self.filters,
         ) {
             Ok(src) => {
-                self.player.append(src);
-                self.player.set_volume(self.volume);
-                self.player.play();
+                self.player().append(src);
+                self.player().set_volume(self.volume);
+                self.player().play();
                 self.state = PlayState::Playing;
                 self.started = Some(Instant::now());
                 self.prefetch_next();
@@ -477,7 +609,8 @@ impl Engine {
     }
 
     fn stop(&mut self) {
-        self.player.clear();
+        self.cancel_fade();
+        self.player().clear();
         self.state = PlayState::Stopped;
         self.started = None;
     }
@@ -502,13 +635,13 @@ impl Engine {
     }
 
     fn poll_track_end(&mut self) {
-        if self.state != PlayState::Playing {
+        if self.state != PlayState::Playing || self.fading.is_some() {
             return;
         }
         // A queued next source means rodio handles the handover itself; the
         // queue length dropping back to one is how we learn it happened.
         if let Some((index, progress)) = self.armed.clone() {
-            if self.player.len() <= 1 {
+            if self.player().len() <= 1 {
                 self.index = index;
                 self.progress = progress;
                 self.armed = None;
@@ -522,7 +655,7 @@ impl Engine {
         if t0.elapsed() < Duration::from_millis(400) {
             return;
         }
-        if self.player.empty() {
+        if self.player().empty() {
             self.advance(false);
         }
     }
