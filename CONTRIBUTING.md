@@ -56,8 +56,8 @@ Response shapes are the project's most persistent risk, so they are pinned by
 fixtures rather than trusted:
 
 ```bash
-cargo run --release --bin probe           # read-only tour of every API surface
-cargo run --release --bin dump-fixtures   # refresh crates/ytm-api/tests/fixtures
+cargo run --release --features dev-tools --bin probe          # read-only tour of every API surface
+cargo run --release --features dev-tools --bin dump-fixtures  # refresh the fixtures
 cargo test -p ytm-api                     # assert what the parsers must extract
 ```
 

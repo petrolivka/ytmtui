@@ -57,10 +57,10 @@ jobs:
       # is for.
       - name: Clippy
         if: matrix.rust == 'stable'
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets --features dev-tools
 
       - name: Build
-        run: cargo build --workspace --all-targets
+        run: cargo build --workspace --all-targets --features dev-tools
 
       # The fixture and robustness suites need no network and no audio device,
       # which is the point of capturing fixtures in the first place.

@@ -78,9 +78,13 @@ Run `ytmtui --doctor` to check all of this at once.
 ## Installing
 
 ```bash
-cargo binstall ytmtui           # prebuilt binary, once released
-cargo install --path .          # from a checkout
+cargo binstall ytmtui                          # prebuilt binary, once released
+cargo install --path .                         # from a checkout, into ~/.cargo/bin
+cargo install --path . --root ~/.local         # ... or wherever your PATH points
 ```
+
+Only `ytmtui` is installed; the development tools below are behind a feature so
+they stay out of your PATH.
 
 Packaging recipes for Arch and Homebrew live in
 [`contrib/packaging/`](contrib/packaging). Both declare `ffmpeg` and `yt-dlp` as
@@ -222,8 +226,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). In short:
 cargo test --workspace                  # 53 tests; the parser suites need no network
 cargo clippy --workspace --all-targets  # must be clean
 cargo fmt --all
-cargo run --bin probe                   # read-only check of every API surface
-cargo run --bin dump-fixtures           # refresh the captured InnerTube responses
+cargo run --features dev-tools --bin probe          # read-only check of every API surface
+cargo run --features dev-tools --bin dump-fixtures  # refresh the captured responses
 ```
 
 The parser tests run against committed fixtures rather than the live API, so a

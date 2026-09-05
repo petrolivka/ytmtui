@@ -34,7 +34,7 @@ first release.
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets     # must be clean
 cargo test --workspace
-cargo publish --dry-run
+cargo publish --dry-run   # installs only `ytmtui`; dev tools are feature-gated
 ```
 
 Then tag `v0.1.0`; the release workflow builds Linux x86-64, Linux aarch64 and

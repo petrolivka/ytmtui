@@ -51,6 +51,13 @@ categories = ["command-line-utilities", "multimedia::audio"]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
 pkg-fmt = "tgz"
 
+# Only ytmtui is installed. The rest are development tools with deliberately
+# generic names - `probe`, `tune` - which have no business landing in a user's
+# PATH, so they are gated behind a feature that `cargo install` does not enable.
+[features]
+default = []
+dev-tools = []
+
 [[bin]]
 name = "ytmtui"
 path = "src/main.rs"
@@ -58,18 +65,22 @@ path = "src/main.rs"
 [[bin]]
 name = "tune"
 path = "src/bin/tune.rs"
+required-features = ["dev-tools"]
 
 [[bin]]
 name = "dump-fixtures"
 path = "src/bin/dump-fixtures.rs"
+required-features = ["dev-tools"]
 
 [[bin]]
 name = "probe"
 path = "src/bin/probe.rs"
+required-features = ["dev-tools"]
 
 [[bin]]
 name = "authcheck"
 path = "src/bin/authcheck.rs"
+required-features = ["dev-tools"]
 
 [dependencies]
 ytm-core = { path = "crates/ytm-core" }
