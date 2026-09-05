@@ -161,6 +161,26 @@ fn main() -> Result<()> {
         }
     }
 
+    println!("\n== synced lyrics (LRCLIB) ==");
+    for (artist, title, secs) in [
+        ("Daft Punk", "Around the World", 428u64),
+        ("Boards of Canada", "Roygbiv", 150),
+        ("Agnes Obel", "Familiar", 236),
+    ] {
+        let mut t = ytm_core::Track::new("00000000000", title, artist);
+        t.duration = Some(std::time::Duration::from_secs(secs));
+        match yt.synced_lyrics(&t) {
+            Ok(Some(l)) => {
+                println!("   {artist} - {title}: {} synced lines", l.len());
+                for line in l.iter().take(3) {
+                    println!("      [{:>6.2}s] {}", line.at.as_secs_f32(), trunc(&line.text, 50));
+                }
+            }
+            Ok(None) => println!("   {artist} - {title}: no synced lyrics"),
+            Err(e) => println!("   {artist} - {title}: FAILED: {e}"),
+        }
+    }
+
     println!("\n== lyrics ==");
     for id in ["sWcLccMuCA8", "EnjOz4wtS8Q"] {
         let vid = ytm_core::VideoId(id.into());

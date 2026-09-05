@@ -58,6 +58,7 @@ pub enum AppEvent {
     RadioFrom(Track, Result<Vec<Track>, String>),
     TrackState(VideoId, TrackState),
     Lyrics(VideoId, Result<Option<String>, String>),
+    SyncedLyrics(VideoId, Vec<ytm_api::lrclib::Line>),
     Playlists(Result<Vec<PlaylistRef>, String>),
     Suggestions(String, Vec<String>),
     ArtReady,
@@ -131,6 +132,8 @@ pub struct App {
     /// Lyrics for the track they belong to, so a stale fetch is never shown
     /// against the wrong song.
     pub lyrics: Option<(VideoId, Option<String>)>,
+    /// Time-synced lyrics, when a provider has them for this track.
+    pub lyrics_synced: Option<(VideoId, Vec<ytm_api::lrclib::Line>)>,
     pub lyrics_scroll: u16,
     pub lyrics_loading: bool,
     pub spectrum: Arc<ArcSwap<SpectrumFrame>>,
@@ -210,6 +213,7 @@ impl App {
             config_checked: Instant::now(),
             history_pos: None,
             lyrics: None,
+            lyrics_synced: None,
             lyrics_scroll: 0,
             lyrics_loading: false,
             history: std::collections::VecDeque::with_capacity(512),
@@ -499,6 +503,11 @@ impl App {
                         self.suggestions = list;
                     }
                 }
+                AppEvent::SyncedLyrics(id, lines) => {
+                    if self.player.status().current.as_ref().map(|t| &t.id) == Some(&id) {
+                        self.lyrics_synced = Some((id, lines));
+                    }
+                }
                 AppEvent::ArtReady => self.art_fetching = false,
                 AppEvent::Toast(m) => self.toast(m),
             }
@@ -527,7 +536,9 @@ impl App {
         self.prev_track = cur.clone();
         self.now = TrackState { id: cur.clone(), ..Default::default() };
         self.lyrics = None;
+        self.lyrics_synced = None;
         self.lyrics_scroll = 0;
+        self.notify_track_change();
         self.art_cells.clear();
         self.art_for = None;
         if self.show_lyrics {
@@ -549,6 +560,22 @@ impl App {
         });
     }
 
+    fn notify_track_change(&self) {
+        if !self.config.general.notifications {
+            return;
+        }
+        let Some(t) = self.player.status().current.clone() else { return };
+        // Off the UI thread: spawning a notifier can block for a moment.
+        std::thread::spawn(move || {
+            let body = if t.album.is_some() {
+                format!("{}  \u{2022}  {}", t.artist, t.album.clone().unwrap_or_default())
+            } else {
+                t.artist.clone()
+            };
+            crate::notify::track_changed(&t.title, &body);
+        });
+    }
+
     /// Fetch lyrics for whatever is playing, if the panel is open and we do
     /// not already have them for that exact track.
     fn fetch_lyrics(&mut self) {
@@ -564,9 +591,15 @@ impl App {
         let b = self.backend.clone();
         let tx = self.tx.clone();
         let id = track.id.clone();
+        let t = track.clone();
         std::thread::spawn(move || {
             let r = b.lyrics(&id).map_err(|e| e.to_string());
-            let _ = tx.send(AppEvent::Lyrics(id, r));
+            let _ = tx.send(AppEvent::Lyrics(id.clone(), r));
+            // Synced lyrics come from a different provider and often miss;
+            // they are an upgrade on the plain ones, never a prerequisite.
+            if let Ok(Some(lines)) = b.synced_lyrics(&t) {
+                let _ = tx.send(AppEvent::SyncedLyrics(id, lines));
+            }
         });
     }
 

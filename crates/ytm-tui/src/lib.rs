@@ -6,6 +6,7 @@ pub mod cover;
 pub mod keymap;
 pub mod modal;
 pub mod nav;
+pub mod notify;
 pub mod session;
 pub mod spectrum;
 pub mod theme;

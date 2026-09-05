@@ -429,6 +429,11 @@ impl Innertube {
         Ok(RowPage { title: page_title(&v), rows, continuation: parse::continuation(&v) })
     }
 
+    /// Time-synced lyrics from LRCLIB, which YouTube Music does not provide.
+    pub fn synced_lyrics(&self, t: &Track) -> Result<Option<Vec<crate::lrclib::Line>>> {
+        crate::lrclib::fetch(&self.http, &t.artist, &t.title, t.album.as_deref(), t.duration)
+    }
+
     /// Search-as-you-type suggestions.
     pub fn search_suggestions(&self, input: &str) -> Result<Vec<String>> {
         if input.trim().is_empty() {

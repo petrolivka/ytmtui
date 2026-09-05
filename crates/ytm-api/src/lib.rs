@@ -3,6 +3,7 @@
 
 pub mod innertube;
 pub mod json;
+pub mod lrclib;
 pub mod parse;
 
 use anyhow::Result;
@@ -23,6 +24,7 @@ pub trait MusicBackend: Send + Sync {
     /// Lyrics for a track, or None when YouTube Music has none.
     fn lyrics(&self, id: &VideoId) -> Result<Option<String>>;
     fn search_suggestions(&self, input: &str) -> Result<Vec<String>>;
+    fn synced_lyrics(&self, t: &Track) -> Result<Option<Vec<lrclib::Line>>>;
     fn create_playlist(&self, title: &str, description: &str) -> Result<PlaylistId>;
     fn delete_playlist(&self, id: &PlaylistId) -> Result<()>;
     fn rename_playlist(&self, id: &PlaylistId, title: &str) -> Result<()>;
@@ -68,6 +70,9 @@ impl MusicBackend for Innertube {
     }
     fn search_suggestions(&self, input: &str) -> Result<Vec<String>> {
         Innertube::search_suggestions(self, input)
+    }
+    fn synced_lyrics(&self, t: &Track) -> Result<Option<Vec<lrclib::Line>>> {
+        Innertube::synced_lyrics(self, t)
     }
     fn create_playlist(&self, title: &str, description: &str) -> Result<PlaylistId> {
         Innertube::create_playlist(self, title, description)

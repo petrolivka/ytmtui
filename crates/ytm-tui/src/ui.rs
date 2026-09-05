@@ -516,9 +516,38 @@ fn draw_queue(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect) {
 
 fn draw_lyrics(f: &mut Frame, app: &App, area: Rect) {
     let focused = app.focus == Focus::Queue;
-    let b = block(app, "lyrics".into(), focused);
+    let title = if app.lyrics_synced.is_some() { "lyrics \u{2022} synced" } else { "lyrics" };
+    let b = block(app, title.into(), focused);
     let inner = b.inner(area);
     f.render_widget(b, area);
+
+    // Synced lyrics scroll themselves and highlight the current line.
+    if let Some((_, lines)) = &app.lyrics_synced {
+        let pos = app.player.status().position;
+        let active = ytm_api::lrclib::active_line(lines, pos);
+        let h = inner.height as usize;
+        // Keep the active line around a third of the way down.
+        let first = active
+            .unwrap_or(0)
+            .saturating_sub(h / 3)
+            .min(lines.len().saturating_sub(h.min(lines.len())));
+        let rendered: Vec<Line> = lines
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(h)
+            .map(|(i, l)| {
+                let style = if Some(i) == active {
+                    Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(app.theme.dim)
+                };
+                Line::from(Span::styled(l.text.clone(), style))
+            })
+            .collect();
+        f.render_widget(Paragraph::new(rendered).wrap(Wrap { trim: false }), inner);
+        return;
+    }
 
     let (text, style) = match (&app.lyrics, app.lyrics_loading) {
         (_, true) => ("loading\u{2026}".to_string(), app.theme.dim),

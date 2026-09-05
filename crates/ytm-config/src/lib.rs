@@ -37,6 +37,8 @@ pub struct General {
     pub restore_session: bool,
     /// Thumbs-down also skips, as the official player does.
     pub dislike_skips: bool,
+    /// Desktop notification when the track changes.
+    pub notifications: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,7 +136,12 @@ pub struct Theme {
 
 impl Default for General {
     fn default() -> Self {
-        Self { autoplay: true, restore_session: true, dislike_skips: true }
+        Self {
+            autoplay: true,
+            restore_session: true,
+            dislike_skips: true,
+            notifications: false,
+        }
     }
 }
 
