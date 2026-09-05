@@ -1,0 +1,4 @@
+target/
+*.log
+auth.json
+cookies.txt
