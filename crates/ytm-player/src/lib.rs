@@ -2,6 +2,8 @@
 //! playback/queue engine.
 
 pub mod engine;
+#[cfg(target_os = "linux")]
+pub mod mpris;
 pub mod pcm;
 pub mod resolver;
 

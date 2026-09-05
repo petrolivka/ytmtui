@@ -107,6 +107,22 @@ fn main() -> Result<()> {
     ))));
     let (player, tap) = ytm_player::spawn(resolver).context("starting playback engine")?;
 
+    // MPRIS is best-effort: no session bus (a bare TTY, a container, SSH
+    // without one) simply means no media-key integration, not a failure to
+    // start. The connection must outlive the UI for the bus name to stay
+    // claimed, hence the binding.
+    #[cfg(target_os = "linux")]
+    let _mpris = match ytm_player::mpris::serve(player.clone()) {
+        Ok(c) => {
+            tracing::info!("MPRIS published as org.mpris.MediaPlayer2.ytmtui");
+            Some(c)
+        }
+        Err(e) => {
+            tracing::warn!("MPRIS unavailable: {e}");
+            None
+        }
+    };
+
     ytm_tui::run(backend, player, tap, config)
 }
 

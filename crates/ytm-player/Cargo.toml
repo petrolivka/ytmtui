@@ -12,3 +12,4 @@ ringbuf.workspace = true
 arc-swap.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
