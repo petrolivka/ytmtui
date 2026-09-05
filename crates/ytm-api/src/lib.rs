@@ -3,24 +3,59 @@
 
 pub mod innertube;
 pub mod json;
+pub mod parse;
 
 use anyhow::Result;
-use ytm_core::{Rating, Track, VideoId};
+use ytm_core::{BrowseId, Rating, Row, Track, VideoId};
 
-pub use innertube::Innertube;
+pub use innertube::{ExploreSection, Innertube, LibrarySection, SearchFilter};
 
+/// Everything the app needs from the network. One trait so an InnerTube change
+/// or a library swap stays a contained fix.
 pub trait MusicBackend: Send + Sync {
+    fn search(&self, query: &str, filter: SearchFilter) -> Result<Vec<Row>>;
     fn search_songs(&self, query: &str) -> Result<Vec<Track>>;
+    fn home(&self) -> Result<Vec<Row>>;
+    fn library(&self, section: LibrarySection) -> Result<Vec<Row>>;
+    fn explore(&self, section: ExploreSection) -> Result<Vec<Row>>;
+    fn artist(&self, id: &BrowseId) -> Result<(String, Vec<Row>)>;
+    fn album(&self, id: &BrowseId) -> Result<(String, Vec<Row>)>;
+    fn playlist(&self, id: &BrowseId) -> Result<(String, Vec<Row>)>;
     fn liked_songs(&self) -> Result<Vec<Track>>;
     /// Autoplay continuation seeded from a track.
     fn radio(&self, seed: &VideoId) -> Result<Vec<Track>>;
     fn rate(&self, id: &VideoId, rating: Rating) -> Result<()>;
+    /// Add to or remove from the library - not the same as thumbs-up.
+    fn set_library(&self, token: &str) -> Result<()>;
+    /// True rating + library state for a track (FR-R7).
+    fn track_state(&self, id: &VideoId) -> Result<(Rating, Option<String>, Option<String>, bool)>;
     fn is_authenticated(&self) -> bool;
 }
 
 impl MusicBackend for Innertube {
+    fn search(&self, query: &str, filter: SearchFilter) -> Result<Vec<Row>> {
+        Innertube::search(self, query, filter)
+    }
     fn search_songs(&self, query: &str) -> Result<Vec<Track>> {
         Innertube::search_songs(self, query)
+    }
+    fn home(&self) -> Result<Vec<Row>> {
+        Innertube::home(self)
+    }
+    fn library(&self, section: LibrarySection) -> Result<Vec<Row>> {
+        Innertube::library(self, section)
+    }
+    fn explore(&self, section: ExploreSection) -> Result<Vec<Row>> {
+        Innertube::explore(self, section)
+    }
+    fn artist(&self, id: &BrowseId) -> Result<(String, Vec<Row>)> {
+        Innertube::artist(self, id)
+    }
+    fn album(&self, id: &BrowseId) -> Result<(String, Vec<Row>)> {
+        Innertube::album(self, id)
+    }
+    fn playlist(&self, id: &BrowseId) -> Result<(String, Vec<Row>)> {
+        Innertube::playlist(self, id)
     }
     fn liked_songs(&self) -> Result<Vec<Track>> {
         Innertube::liked_songs(self)
@@ -30,6 +65,12 @@ impl MusicBackend for Innertube {
     }
     fn rate(&self, id: &VideoId, rating: Rating) -> Result<()> {
         Innertube::rate(self, id, rating)
+    }
+    fn set_library(&self, token: &str) -> Result<()> {
+        Innertube::set_library(self, token)
+    }
+    fn track_state(&self, id: &VideoId) -> Result<(Rating, Option<String>, Option<String>, bool)> {
+        Innertube::track_state(self, id)
     }
     fn is_authenticated(&self) -> bool {
         Innertube::is_authenticated(self)

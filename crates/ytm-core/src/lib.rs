@@ -25,6 +25,26 @@ impl VideoId {
     }
 }
 
+/// An InnerTube `browseId`, addressing an artist, album or playlist page.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BrowseId(pub String);
+
+impl fmt::Display for BrowseId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A playlist id, which is not interchangeable with a browse id.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PlaylistId(pub String);
+
+impl fmt::Display for PlaylistId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// A playable track.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Track {
@@ -37,6 +57,12 @@ pub struct Track {
     pub feedback_token_add: Option<String>,
     pub feedback_token_remove: Option<String>,
     pub rating: Rating,
+    /// Whether the track is in the user's library. Distinct from `rating`:
+    /// liking a song adds it to Liked Songs, not to the library.
+    pub in_library: bool,
+    /// Targets for "go to album" / "go to artist" navigation.
+    pub album_id: Option<BrowseId>,
+    pub artist_id: Option<BrowseId>,
 }
 
 impl Track {
@@ -50,6 +76,9 @@ impl Track {
             feedback_token_add: None,
             feedback_token_remove: None,
             rating: Rating::Indifferent,
+            in_library: false,
+            album_id: None,
+            artist_id: None,
         }
     }
 
@@ -155,5 +184,93 @@ pub fn fmt_duration(d: Duration) -> String {
         format!("{}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60)
     } else {
         format!("{}:{:02}", s / 60, s % 60)
+    }
+}
+
+/// A card pointing at an album page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlbumRef {
+    pub id: BrowseId,
+    pub title: String,
+    pub artist: String,
+    pub year: Option<String>,
+}
+
+/// A card pointing at an artist page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArtistRef {
+    pub id: BrowseId,
+    pub name: String,
+    pub subtitle: String,
+}
+
+/// A card pointing at a playlist.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlaylistRef {
+    pub id: BrowseId,
+    pub playlist_id: Option<PlaylistId>,
+    pub title: String,
+    pub subtitle: String,
+}
+
+/// One line in the main pane.
+///
+/// Home, search, library and every entity page render through this single
+/// shape, so navigation and selection are written once rather than per view.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Row {
+    /// A non-selectable section heading, e.g. a Home shelf title.
+    Header(String),
+    Track(Track),
+    Album(AlbumRef),
+    Artist(ArtistRef),
+    Playlist(PlaylistRef),
+}
+
+impl Row {
+    pub fn is_selectable(&self) -> bool {
+        !matches!(self, Row::Header(_))
+    }
+
+    pub fn title(&self) -> &str {
+        match self {
+            Row::Header(t) => t,
+            Row::Track(t) => &t.title,
+            Row::Album(a) => &a.title,
+            Row::Artist(a) => &a.name,
+            Row::Playlist(p) => &p.title,
+        }
+    }
+
+    pub fn subtitle(&self) -> String {
+        match self {
+            Row::Header(_) => String::new(),
+            Row::Track(t) => t.artist.clone(),
+            Row::Album(a) => match &a.year {
+                Some(y) => format!("{} \u{2022} {}", a.artist, y),
+                None => a.artist.clone(),
+            },
+            Row::Artist(a) => a.subtitle.clone(),
+            Row::Playlist(p) => p.subtitle.clone(),
+        }
+    }
+
+    /// Short tag shown in the right-hand column, so the kind of a row is
+    /// obvious without relying on colour alone (NFR-8).
+    pub fn tag(&self) -> String {
+        match self {
+            Row::Header(_) => String::new(),
+            Row::Track(t) => t.duration_str(),
+            Row::Album(_) => "album".into(),
+            Row::Artist(_) => "artist".into(),
+            Row::Playlist(_) => "playlist".into(),
+        }
+    }
+
+    pub fn as_track(&self) -> Option<&Track> {
+        match self {
+            Row::Track(t) => Some(t),
+            _ => None,
+        }
     }
 }

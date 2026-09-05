@@ -43,6 +43,10 @@ name = "tune"
 path = "src/bin/tune.rs"
 
 [[bin]]
+name = "probe"
+path = "src/bin/probe.rs"
+
+[[bin]]
 name = "authcheck"
 path = "src/bin/authcheck.rs"
 
