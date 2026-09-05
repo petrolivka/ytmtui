@@ -5,6 +5,7 @@
 //! docs/TECH-STACK-RISK-ANALYSIS.md.
 //!
 //!   authcheck                    # read-only check
+//!   authcheck --find <query>     # look up video ids to test with
 //!   authcheck --like <videoId>   # like, verify, then restore the previous state
 
 use anyhow::Result;
@@ -35,6 +36,26 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
 
+    let args: Vec<String> = std::env::args().collect();
+
+    // Look up ids without touching the account, so the write test below can be
+    // pointed at a specific track without hunting for an id in a browser.
+    if let Some(i) = args.iter().position(|a| a == "--find") {
+        let q = args[i + 1..].join(" ");
+        if q.trim().is_empty() {
+            eprintln!("--find needs a search query");
+            std::process::exit(2);
+        }
+        let liked: std::collections::HashSet<String> =
+            yt.liked_songs().unwrap_or_default().into_iter().map(|t| t.id.0).collect();
+        for t in yt.search_songs(&q)?.iter().take(10) {
+            let mark = if liked.contains(&t.id.0) { "already liked" } else { "" };
+            println!("  {:11}  {:>7}  {} - {}  {}", t.id, t.duration_str(), t.title, t.artist, mark);
+        }
+        println!("\n(the first page of Liked Songs was checked; \"already liked\" rows make an inconclusive test)");
+        return Ok(());
+    }
+
     println!("== authenticated read ==");
     // A missing account name is cosmetic; do not fail the whole check for it.
     match yt.account_name() {
@@ -56,9 +77,11 @@ fn main() -> Result<()> {
         println!("  (empty first page - if you do have liked songs, the parser needs a look)");
     }
 
-    let args: Vec<String> = std::env::args().collect();
     let Some(i) = args.iter().position(|a| a == "--like") else {
-        println!("\nread path OK. Pass `--like <videoId>` to exercise the write path.");
+        println!(
+            "\nread path OK.\n\
+             Next: `--find <query>` to get a video id, then `--like <id>` for the write path."
+        );
         return Ok(());
     };
     let Some(raw) = args.get(i + 1) else {
