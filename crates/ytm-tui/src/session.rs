@@ -61,9 +61,16 @@ fn history_path() -> Option<PathBuf> {
 
 /// Recent searches, most recent first (FR-S3).
 pub fn load_search_history() -> Vec<String> {
-    let Some(p) = history_path() else { return Vec::new() };
+    let Some(p) = history_path() else {
+        return Vec::new();
+    };
     std::fs::read_to_string(p)
-        .map(|t| t.lines().map(|l| l.to_string()).filter(|l| !l.is_empty()).collect())
+        .map(|t| {
+            t.lines()
+                .map(|l| l.to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
         .unwrap_or_default()
 }
 

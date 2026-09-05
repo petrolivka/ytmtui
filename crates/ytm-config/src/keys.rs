@@ -43,13 +43,28 @@ pub struct Chord {
 
 impl Chord {
     pub fn plain(key: Key) -> Self {
-        Self { key, mods: Mods::default() }
+        Self {
+            key,
+            mods: Mods::default(),
+        }
     }
     pub fn shift(key: Key) -> Self {
-        Self { key, mods: Mods { shift: true, ..Default::default() } }
+        Self {
+            key,
+            mods: Mods {
+                shift: true,
+                ..Default::default()
+            },
+        }
     }
     pub fn ctrl(key: Key) -> Self {
-        Self { key, mods: Mods { ctrl: true, ..Default::default() } }
+        Self {
+            key,
+            mods: Mods {
+                ctrl: true,
+                ..Default::default()
+            },
+        }
     }
 }
 
@@ -153,9 +168,18 @@ mod tests {
 
     #[test]
     fn parses_bindings() {
-        assert_eq!("space".parse::<Chord>().unwrap(), Chord::plain(Key::Char(' ')));
-        assert_eq!("ctrl+c".parse::<Chord>().unwrap(), Chord::ctrl(Key::Char('c')));
-        assert_eq!("shift+left".parse::<Chord>().unwrap(), Chord::shift(Key::Left));
+        assert_eq!(
+            "space".parse::<Chord>().unwrap(),
+            Chord::plain(Key::Char(' '))
+        );
+        assert_eq!(
+            "ctrl+c".parse::<Chord>().unwrap(),
+            Chord::ctrl(Key::Char('c'))
+        );
+        assert_eq!(
+            "shift+left".parse::<Chord>().unwrap(),
+            Chord::shift(Key::Left)
+        );
         assert_eq!("f5".parse::<Chord>().unwrap(), Chord::plain(Key::F(5)));
         // A literal plus is a plausible binding and must not parse as an empty key.
         assert_eq!("+".parse::<Chord>().unwrap(), Chord::plain(Key::Char('+')));

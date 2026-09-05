@@ -24,17 +24,30 @@ fn show(rows: &[Row], n: usize) {
     for r in rows.iter().take(n) {
         match r {
             Row::Header(t) => println!("      -- {t}"),
-            other => println!("      {:<9} {:<40} {}", other.tag(), trunc(other.title(), 40), trunc(&other.subtitle(), 30)),
+            other => println!(
+                "      {:<9} {:<40} {}",
+                other.tag(),
+                trunc(other.title(), 40),
+                trunc(&other.subtitle(), 30)
+            ),
         }
     }
 }
 
 fn more(p: &ytm_api::RowPage) -> String {
-    if p.continuation.is_some() { "  (+more)".into() } else { String::new() }
+    if p.continuation.is_some() {
+        "  (+more)".into()
+    } else {
+        String::new()
+    }
 }
 
 fn trunc(s: &str, n: usize) -> String {
-    if s.chars().count() <= n { s.to_string() } else { s.chars().take(n - 1).collect::<String>() + "\u{2026}" }
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        s.chars().take(n - 1).collect::<String>() + "\u{2026}"
+    }
 }
 
 fn main() -> Result<()> {
@@ -43,14 +56,20 @@ fn main() -> Result<()> {
 
     println!("== home ==");
     match yt.home() {
-        Ok(p) => { println!("   {}{}", summarise(&p.rows), more(&p)); show(&p.rows, 10); }
+        Ok(p) => {
+            println!("   {}{}", summarise(&p.rows), more(&p));
+            show(&p.rows, 10);
+        }
         Err(e) => println!("   FAILED: {e}"),
     }
 
     println!("\n== search tabs ==");
     for f in SearchFilter::ALL {
         match yt.search("aphex twin", f) {
-            Ok(p) => { println!("   {:<10} {}{}", f.label(), summarise(&p.rows), more(&p)); show(&p.rows, 3); }
+            Ok(p) => {
+                println!("   {:<10} {}{}", f.label(), summarise(&p.rows), more(&p));
+                show(&p.rows, 3);
+            }
             Err(e) => println!("   {:<10} FAILED: {e}", f.label()),
         }
     }
@@ -67,8 +86,12 @@ fn main() -> Result<()> {
                 for row in &p.rows {
                     match row {
                         Row::Album(a) if first_album.is_none() => first_album = Some(a.id.clone()),
-                        Row::Artist(a) if first_artist.is_none() => first_artist = Some(a.id.clone()),
-                        Row::Playlist(p) if first_playlist.is_none() => first_playlist = Some(p.id.clone()),
+                        Row::Artist(a) if first_artist.is_none() => {
+                            first_artist = Some(a.id.clone())
+                        }
+                        Row::Playlist(p) if first_playlist.is_none() => {
+                            first_playlist = Some(p.id.clone())
+                        }
                         _ => {}
                     }
                 }
@@ -81,35 +104,68 @@ fn main() -> Result<()> {
     // Fall back to search results when the library has nothing of a kind.
     if first_album.is_none() {
         if let Ok(p) = yt.search("selected ambient works", SearchFilter::Albums) {
-            first_album = p.rows.iter().find_map(|x| match x { Row::Album(a) => Some(a.id.clone()), _ => None });
+            first_album = p.rows.iter().find_map(|x| match x {
+                Row::Album(a) => Some(a.id.clone()),
+                _ => None,
+            });
         }
     }
     if first_artist.is_none() {
         if let Ok(p) = yt.search("aphex twin", SearchFilter::Artists) {
-            first_artist = p.rows.iter().find_map(|x| match x { Row::Artist(a) => Some(a.id.clone()), _ => None });
+            first_artist = p.rows.iter().find_map(|x| match x {
+                Row::Artist(a) => Some(a.id.clone()),
+                _ => None,
+            });
         }
     }
     if first_playlist.is_none() {
         if let Ok(p) = yt.search("ambient", SearchFilter::Playlists) {
-            first_playlist = p.rows.iter().find_map(|x| match x { Row::Playlist(q) => Some(q.id.clone()), _ => None });
+            first_playlist = p.rows.iter().find_map(|x| match x {
+                Row::Playlist(q) => Some(q.id.clone()),
+                _ => None,
+            });
         }
     }
 
     if let Some(id) = &first_artist {
         match yt.artist(id) {
-            Ok(p) => { println!("   artist   {id} -> \"{}\": {}{}", p.title.clone().unwrap_or_default(), summarise(&p.rows), more(&p)); show(&p.rows, 6); }
+            Ok(p) => {
+                println!(
+                    "   artist   {id} -> \"{}\": {}{}",
+                    p.title.clone().unwrap_or_default(),
+                    summarise(&p.rows),
+                    more(&p)
+                );
+                show(&p.rows, 6);
+            }
             Err(e) => println!("   artist   {id} FAILED: {e}"),
         }
     }
     if let Some(id) = &first_album {
         match yt.album(id) {
-            Ok(p) => { println!("   album    {id} -> \"{}\": {}{}", p.title.clone().unwrap_or_default(), summarise(&p.rows), more(&p)); show(&p.rows, 5); }
+            Ok(p) => {
+                println!(
+                    "   album    {id} -> \"{}\": {}{}",
+                    p.title.clone().unwrap_or_default(),
+                    summarise(&p.rows),
+                    more(&p)
+                );
+                show(&p.rows, 5);
+            }
             Err(e) => println!("   album    {id} FAILED: {e}"),
         }
     }
     if let Some(id) = &first_playlist {
         match yt.playlist(id) {
-            Ok(p) => { println!("   playlist {id} -> \"{}\": {}{}", p.title.clone().unwrap_or_default(), summarise(&p.rows), more(&p)); show(&p.rows, 5); }
+            Ok(p) => {
+                println!(
+                    "   playlist {id} -> \"{}\": {}{}",
+                    p.title.clone().unwrap_or_default(),
+                    summarise(&p.rows),
+                    more(&p)
+                );
+                show(&p.rows, 5);
+            }
             Err(e) => println!("   playlist {id} FAILED: {e}"),
         }
     }
@@ -118,15 +174,27 @@ fn main() -> Result<()> {
     // Cross-check against the liked list: if a track that is demonstrably in
     // Liked Songs reports Indifferent, the likeStatus parsing is the problem,
     // not the account.
-    let liked = yt.library(LibrarySection::Liked).map(|p| p.rows).unwrap_or_default();
+    let liked = yt
+        .library(LibrarySection::Liked)
+        .map(|p| p.rows)
+        .unwrap_or_default();
     let ids: Vec<ytm_core::VideoId> = std::env::args()
         .skip(1)
         .filter(|a| a.len() == 11)
         .map(ytm_core::VideoId)
-        .chain(liked.iter().filter_map(|r| r.as_track()).take(3).map(|t| t.id.clone()))
+        .chain(
+            liked
+                .iter()
+                .filter_map(|r| r.as_track())
+                .take(3)
+                .map(|t| t.id.clone()),
+        )
         .collect();
     for id in ids {
-        let in_liked_list = liked.iter().filter_map(|r| r.as_track()).any(|t| t.id == id);
+        let in_liked_list = liked
+            .iter()
+            .filter_map(|r| r.as_track())
+            .any(|t| t.id == id);
         match yt.track_state(&id) {
             Ok((r, add, rem, in_lib)) => println!(
                 "   {id}: rating={r:?} (in Liked list: {in_liked_list})  in_library={in_lib} tokens={}/{}",
@@ -137,7 +205,9 @@ fn main() -> Result<()> {
     }
     if std::env::args().any(|a| a == "--where-is-likestatus") {
         let id = ytm_core::VideoId(
-            std::env::args().find(|a| a.len() == 11).unwrap_or_else(|| "sWcLccMuCA8".into()),
+            std::env::args()
+                .find(|a| a.len() == 11)
+                .unwrap_or_else(|| "sWcLccMuCA8".into()),
         );
         let v = yt.debug_next(&id)?;
         let mut hits = Vec::new();
@@ -173,7 +243,11 @@ fn main() -> Result<()> {
             Ok(Some(l)) => {
                 println!("   {artist} - {title}: {} synced lines", l.len());
                 for line in l.iter().take(3) {
-                    println!("      [{:>6.2}s] {}", line.at.as_secs_f32(), trunc(&line.text, 50));
+                    println!(
+                        "      [{:>6.2}s] {}",
+                        line.at.as_secs_f32(),
+                        trunc(&line.text, 50)
+                    );
                 }
             }
             Ok(None) => println!("   {artist} - {title}: no synced lyrics"),
@@ -185,7 +259,11 @@ fn main() -> Result<()> {
     for id in ["sWcLccMuCA8", "EnjOz4wtS8Q"] {
         let vid = ytm_core::VideoId(id.into());
         match yt.lyrics(&vid) {
-            Ok(Some(t)) => println!("   {id}: {} chars \u{2014} {:?}\u{2026}", t.len(), trunc(&t.replace('\n', " / "), 70)),
+            Ok(Some(t)) => println!(
+                "   {id}: {} chars \u{2014} {:?}\u{2026}",
+                t.len(),
+                trunc(&t.replace('\n', " / "), 70)
+            ),
             Ok(None) => println!("   {id}: no lyrics available"),
             Err(e) => println!("   {id}: FAILED: {e}"),
         }

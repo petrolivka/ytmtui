@@ -38,13 +38,20 @@ fn open_device(name: &str) -> Result<rodio::MixerDeviceSink> {
 #[derive(Debug, Clone)]
 pub enum Command {
     /// Replace the queue and start at `index`.
-    PlayQueue { tracks: Vec<Track>, index: usize },
+    PlayQueue {
+        tracks: Vec<Track>,
+        index: usize,
+    },
     Enqueue(Track),
     /// Append an autoplay continuation, and resume if the queue had run dry.
     AppendRadio(Vec<Track>),
     /// Reinstate a saved queue, paused at `position`. Restoring a session
     /// should put things back, not start making noise.
-    RestoreQueue { tracks: Vec<Track>, index: usize, position: f64 },
+    RestoreQueue {
+        tracks: Vec<Track>,
+        index: usize,
+        position: f64,
+    },
     PlayNext(Track),
     JumpTo(usize),
     RemoveAt(usize),
@@ -102,11 +109,14 @@ pub fn spawn_on_device(resolver: Arc<ResolverCache>, device: &str) -> Result<(Pl
     let (sink, tap) = pcm::tap(pcm::SAMPLE_RATE as usize * pcm::CHANNELS as usize);
     let errors = tap.errors();
 
-    let handle = PlayerHandle { tx, status: status.clone() };
+    let handle = PlayerHandle {
+        tx,
+        status: status.clone(),
+    };
     std::thread::Builder::new()
         .name("ytm-player".into())
-        .spawn(move || {
-            match Engine::new(resolver, sink, errors, status.clone(), &device) {
+        .spawn(
+            move || match Engine::new(resolver, sink, errors, status.clone(), &device) {
                 Ok(mut e) => e.run(rx),
                 Err(err) => {
                     status.store(Arc::new(PlayerStatus {
@@ -115,8 +125,8 @@ pub fn spawn_on_device(resolver: Arc<ResolverCache>, device: &str) -> Result<(Pl
                         ..Default::default()
                     }));
                 }
-            }
-        })?;
+            },
+        )?;
 
     Ok((handle, tap))
 }
@@ -260,7 +270,11 @@ impl Engine {
                 // The armed decoder is for whatever used to be next.
                 self.disarm_and_correct();
             }
-            Command::RestoreQueue { tracks, index, position } => {
+            Command::RestoreQueue {
+                tracks,
+                index,
+                position,
+            } => {
                 if tracks.is_empty() {
                     return;
                 }
@@ -409,12 +423,16 @@ impl Engine {
         if self.repeat == RepeatMode::One {
             return;
         }
-        let Some(remaining) = self.remaining_secs() else { return };
+        let Some(remaining) = self.remaining_secs() else {
+            return;
+        };
         if remaining > 12.0 {
             return;
         }
         let next_index = self.index + 1;
-        let Some(track) = self.queue.get(next_index).cloned() else { return };
+        let Some(track) = self.queue.get(next_index).cloned() else {
+            return;
+        };
 
         let (tx, rx) = mpsc::channel();
         self.arming = Some(rx);
@@ -481,14 +499,18 @@ impl Engine {
         {
             return;
         }
-        let Some(remaining) = self.remaining_secs() else { return };
+        let Some(remaining) = self.remaining_secs() else {
+            return;
+        };
         // Start opening early enough that the decoder is ready when the fade
         // should begin, rather than after it.
         if remaining > self.crossfade as f64 + 4.0 {
             return;
         }
         let next_index = self.index + 1;
-        let Some(track) = self.queue.get(next_index).cloned() else { return };
+        let Some(track) = self.queue.get(next_index).cloned() else {
+            return;
+        };
 
         // Resolving and opening take a second or more. Doing that here would
         // stall the engine thread, and with it the ramp itself - the fade would

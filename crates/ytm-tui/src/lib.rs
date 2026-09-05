@@ -18,7 +18,6 @@ use std::time::{Duration, Instant};
 use ytm_api::MusicBackend;
 use ytm_player::{PlayerHandle, Tap};
 
-
 pub use app::App;
 
 /// Sixel and the Kitty protocol are raw escapes, so they are written after the
@@ -43,7 +42,9 @@ fn draw_graphics_cover(app: &App) -> Result<()> {
     };
     let want = ytm_art::at_size(
         &url,
-        (area.width as u32).max(area.height as u32 * 2).clamp(64, 544),
+        (area.width as u32)
+            .max(area.height as u32 * 2)
+            .clamp(64, 544),
     );
     let Some(img) = app.art_cache.get(&want) else {
         return Ok(());

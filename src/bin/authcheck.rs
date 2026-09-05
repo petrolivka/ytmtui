@@ -46,11 +46,26 @@ fn main() -> Result<()> {
             eprintln!("--find needs a search query");
             std::process::exit(2);
         }
-        let liked: std::collections::HashSet<String> =
-            yt.liked_songs().unwrap_or_default().into_iter().map(|t| t.id.0).collect();
+        let liked: std::collections::HashSet<String> = yt
+            .liked_songs()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|t| t.id.0)
+            .collect();
         for t in yt.search_songs(&q)?.iter().take(10) {
-            let mark = if liked.contains(&t.id.0) { "already liked" } else { "" };
-            println!("  {:11}  {:>7}  {} - {}  {}", t.id, t.duration_str(), t.title, t.artist, mark);
+            let mark = if liked.contains(&t.id.0) {
+                "already liked"
+            } else {
+                ""
+            };
+            println!(
+                "  {:11}  {:>7}  {} - {}  {}",
+                t.id,
+                t.duration_str(),
+                t.title,
+                t.artist,
+                mark
+            );
         }
         println!("\n(the first page of Liked Songs was checked; \"already liked\" rows make an inconclusive test)");
         return Ok(());
@@ -58,7 +73,9 @@ fn main() -> Result<()> {
 
     // Inspect the autoplay continuation for a track. Read-only.
     if let Some(i) = args.iter().position(|a| a == "--radio") {
-        let seed = ytm_core::VideoId(extract_video_id(args.get(i + 1).map(|s| s.as_str()).unwrap_or("")));
+        let seed = ytm_core::VideoId(extract_video_id(
+            args.get(i + 1).map(|s| s.as_str()).unwrap_or(""),
+        ));
         if !seed.is_valid() {
             eprintln!("--radio needs a video id or URL");
             std::process::exit(2);
@@ -66,7 +83,13 @@ fn main() -> Result<()> {
         let r = yt.radio(&seed)?;
         println!("radio seeded from {seed}: {} tracks", r.len());
         for t in r.iter().take(12) {
-            println!("  {:11}  {:>7}  {} - {}", t.id, t.duration_str(), t.title, t.artist);
+            println!(
+                "  {:11}  {:>7}  {} - {}",
+                t.id,
+                t.duration_str(),
+                t.title,
+                t.artist
+            );
         }
         return Ok(());
     }
@@ -74,7 +97,9 @@ fn main() -> Result<()> {
     // Set a rating explicitly. Exists because an automated UI test once typed
     // a bare 'd' into a signed-in instance and left a thumbs-down behind.
     if let Some(i) = args.iter().position(|a| a == "--rate") {
-        let id = VideoId(extract_video_id(args.get(i + 1).map(|s| s.as_str()).unwrap_or("")));
+        let id = VideoId(extract_video_id(
+            args.get(i + 1).map(|s| s.as_str()).unwrap_or(""),
+        ));
         let want = args.get(i + 2).map(|s| s.as_str()).unwrap_or("none");
         let rating = match want {
             "like" => Rating::Like,
@@ -105,13 +130,25 @@ fn main() -> Result<()> {
     }
 
     let liked = yt.liked_songs()?;
-    println!("  liked songs  : {} returned on the first page", liked.len());
+    println!(
+        "  liked songs  : {} returned on the first page",
+        liked.len()
+    );
     for t in liked.iter().take(8) {
-        println!("     {:11}  {:>7}  {} - {}", t.id, t.duration_str(), t.title, t.artist);
+        println!(
+            "     {:11}  {:>7}  {} - {}",
+            t.id,
+            t.duration_str(),
+            t.title,
+            t.artist
+        );
     }
     let missing = liked.iter().filter(|t| t.duration.is_none()).count();
     if missing > 0 {
-        println!("  note: {missing}/{} rows had no parseable duration", liked.len());
+        println!(
+            "  note: {missing}/{} rows had no parseable duration",
+            liked.len()
+        );
     }
     if liked.is_empty() {
         println!("  (empty first page - if you do have liked songs, the parser needs a look)");

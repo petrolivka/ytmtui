@@ -9,6 +9,7 @@
 | Owner | petr |
 | Scope | Product analysis, feature brainstorm, functional & non-functional requirements, architecture proposal, roadmap |
 | Out of scope | Implementation, detailed API schemas, test plans |
+| M5 results | [M5-STATUS.md](./M5-STATUS.md) — **hardening complete**: fixtures, robustness, CI, packaging |
 | M4 results | [M4-STATUS.md](./M4-STATUS.md) — **delight complete**, album art included |
 | M3 results | [M3-STATUS.md](./M3-STATUS.md) — **polish complete**; all `S` requirements met bar two, listed with reasons |
 | M2 results | [M2-STATUS.md](./M2-STATUS.md) — **parity core complete**; a listening session needs no browser |
@@ -562,7 +563,7 @@ All remappable; the help overlay is generated from the active map so it never dr
 
 | # | Risk | Impact | Likelihood | Mitigation |
 |---|---|---|---|---|
-| R1 | InnerTube response shapes change | Features break silently | **High** | Defensive parsers; fixture-based regression tests; per-feature degradation, never a crash; pin & track upstream crate releases |
+| R1 | InnerTube response shapes change | Features break silently | **High** | **Mitigated in M5**: ten captured fixtures with assertions on what the parsers must extract, plus seeded mutation tests proving they never panic. A shape change now fails loudly in CI instead of showing as an empty pane |
 | R2 | PO-token / bot-detection tightening blocks streams | Degraded, recoverable | Medium | **Revised down** by shipping the yt-dlp resolver in v1: a break becomes a `pip install -U yt-dlp` away from working, not a dead product. `doctor` diagnoses |
 | R3 | Opus decode unavailable in pure Rust | — | — | **Eliminated** by the ffmpeg decode path (companion §5). Symphonia AAC retained as fallback; smoke test per codec |
 | R4 | Visualiser eats CPU / stutters the UI | Core feature feels bad | Medium | Separate thread, ArcSwap, fps cap, adaptive quality, benchmark suite in `ytm-viz` |
@@ -602,7 +603,7 @@ All remappable; the help overlay is generated from the active map so it never dr
 | **M2 — Parity core (v1.0)** ✅ | Home, Library, Liked, artist/album/playlist pages, **thumbs up/down + library toggle**, radio/autoplay, shuffle/repeat, history, help overlay, themes, error toasts | **Met** for the acceptance test: a full listening session needs no browser. On-disk audio cache (FR-C2) deferred with reasons — see [M2-STATUS.md](./M2-STATUS.md) |
 | **M3 — Polish (v1.1)** ✅ | Gapless, MPRIS, lyrics, playlist editing, command palette, mouse, session restore, `doctor` | **Met** except FR-A2 (keyring) and FR-B2 (moods & genres), both deferred with reasons in [M3-STATUS.md](./M3-STATUS.md) |
 | **M4 — Delight (v1.2)** ✅ | Spectrogram mode, beat detection, crossfade, synced lyrics, Sixel art, scrobbling, CLI/IPC | **Met** — all of them, plus album art. See [M4-STATUS.md](./M4-STATUS.md) |
-| **M5 — Hardening** | Fixture test suite for backend shapes, fuzz the parsers, packaging (AUR, brew, cargo-binstall), CI matrix | Reproducible releases |
+| **M5 — Hardening** ✅ | Fixture test suite for backend shapes, fuzz the parsers, packaging (AUR, brew, cargo-binstall), CI matrix | **Met** — fixture and robustness suites, clean clippy/fmt, CI with an offline guarantee, and packaging for AUR, Homebrew and cargo-binstall. See [M5-STATUS.md](./M5-STATUS.md) |
 
 **Suggested build order rationale:** M0 front-loads every risk that could kill the project (stream access, codec, visualiser feasibility) before any UI investment. `ytm-viz` first also means the signature feature gets tuned with a fast local feedback loop rather than being rushed at the end.
 

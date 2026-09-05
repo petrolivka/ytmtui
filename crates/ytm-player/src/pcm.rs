@@ -43,7 +43,10 @@ pub fn tap(capacity: usize) -> (TapSink, Tap) {
     let (prod, cons) = HeapRb::<f32>::new(capacity).split();
     (
         TapSink(Arc::new(Mutex::new(prod))),
-        Tap { cons, errors: Arc::new(Mutex::new(Vec::new())) },
+        Tap {
+            cons,
+            errors: Arc::new(Mutex::new(Vec::new())),
+        },
     )
 }
 
@@ -106,7 +109,10 @@ pub struct Filters {
 
 impl Default for Filters {
     fn default() -> Self {
-        Self { normalize: false, speed: 1.0 }
+        Self {
+            normalize: false,
+            speed: 1.0,
+        }
     }
 }
 
@@ -176,9 +182,12 @@ impl FfmpegPcm {
         // makes ffmpeg abort with "Option reconnect not found".
         if is_network_input(input) {
             cmd.args([
-                "-reconnect", "1",
-                "-reconnect_streamed", "1",
-                "-reconnect_delay_max", "5",
+                "-reconnect",
+                "1",
+                "-reconnect_streamed",
+                "1",
+                "-reconnect_delay_max",
+                "5",
             ]);
         }
         if start > 0.05 {
@@ -192,10 +201,14 @@ impl FfmpegPcm {
         }
         let mut child = cmd
             .args([
-                "-f", "f32le",
-                "-acodec", "pcm_f32le",
-                "-ar", &SAMPLE_RATE.to_string(),
-                "-ac", &CHANNELS.to_string(),
+                "-f",
+                "f32le",
+                "-acodec",
+                "pcm_f32le",
+                "-ar",
+                &SAMPLE_RATE.to_string(),
+                "-ac",
+                &CHANNELS.to_string(),
                 "-",
             ])
             .stdout(Stdio::piped())
@@ -254,7 +267,10 @@ impl FfmpegPcm {
                                 break;
                             }
                             let s = f32::from_le_bytes([
-                                raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3],
+                                raw[i * 4],
+                                raw[i * 4 + 1],
+                                raw[i * 4 + 2],
+                                raw[i * 4 + 3],
                             ]);
                             if prod.try_push(s).is_ok() {
                                 i += 1;
@@ -371,12 +387,22 @@ mod tests {
     fn no_filters_means_no_argument() {
         assert_eq!(Filters::default().to_arg(), None);
         // A speed of exactly 1.0 is not a filter.
-        assert_eq!(Filters { normalize: false, speed: 1.0 }.to_arg(), None);
+        assert_eq!(
+            Filters {
+                normalize: false,
+                speed: 1.0
+            }
+            .to_arg(),
+            None
+        );
     }
 
     #[test]
     fn builds_a_filter_chain() {
-        let f = Filters { normalize: true, speed: 1.25 };
+        let f = Filters {
+            normalize: true,
+            speed: 1.25,
+        };
         let arg = f.to_arg().unwrap();
         assert!(arg.contains("dynaudnorm"));
         assert!(arg.contains("atempo=1.250"));
@@ -385,9 +411,19 @@ mod tests {
 
     #[test]
     fn speed_is_clamped_to_what_atempo_accepts() {
-        let arg = Filters { normalize: false, speed: 9.0 }.to_arg().unwrap();
+        let arg = Filters {
+            normalize: false,
+            speed: 9.0,
+        }
+        .to_arg()
+        .unwrap();
         assert!(arg.contains("atempo=2.000"), "got {arg}");
-        let arg = Filters { normalize: false, speed: 0.1 }.to_arg().unwrap();
+        let arg = Filters {
+            normalize: false,
+            speed: 0.1,
+        }
+        .to_arg()
+        .unwrap();
         assert!(arg.contains("atempo=0.500"), "got {arg}");
     }
 }

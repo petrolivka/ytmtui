@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    name: ${{ matrix.os }} / ${{ matrix.rust }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        rust: [stable]
+        include:
+          # The MSRV is what Symphonia needs; a bump should be deliberate.
+          - os: ubuntu-latest
+            rust: "1.85"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux audio and D-Bus headers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        if: matrix.rust == 'stable'
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      # The fixture and robustness suites need no network and no audio device,
+      # which is the point of capturing fixtures in the first place.
+      - name: Test
+        run: cargo test --workspace
+
+  # Nothing here talks to YouTube: a red CI must mean our code broke, not that
+  # an undocumented API changed overnight.
+  offline-guarantee:
+    name: tests do not reach the network
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the parser suites with networking disabled
+        run: |
+          # Build first: fetching crates does need the network.
+          cargo build --tests -p ytm-api
+          # -rn gives an unprivileged user namespace with no network at all.
+          unshare -rn -- cargo test -p ytm-api --test fixtures --test robustness

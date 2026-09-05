@@ -204,7 +204,9 @@ impl Analyser {
         for i in 0..FFT_SIZE {
             self.scratch_in[i] = self.history[i] * self.window[i];
         }
-        let _ = self.fft.process(&mut self.scratch_in, &mut self.scratch_out);
+        let _ = self
+            .fft
+            .process(&mut self.scratch_in, &mut self.scratch_out);
 
         // RMS for the level meter / silence detection.
         let rms = (self.history.iter().map(|s| s * s).sum::<f32>() / FFT_SIZE as f32).sqrt();

@@ -43,8 +43,20 @@ fn main() -> Result<()> {
     // Talking to a running instance: `ytmtui next`, `ytmtui status --json`.
     // Checked before anything else so it never starts a second player.
     const IPC: &[&str] = &[
-        "status", "next", "prev", "previous", "playpause", "toggle", "play", "pause", "stop",
-        "seek", "volume", "speed", "shuffle", "repeat",
+        "status",
+        "next",
+        "prev",
+        "previous",
+        "playpause",
+        "toggle",
+        "play",
+        "pause",
+        "stop",
+        "seek",
+        "volume",
+        "speed",
+        "shuffle",
+        "repeat",
     ];
     if let Some(first) = args.first() {
         if IPC.contains(&first.as_str()) {
@@ -115,7 +127,11 @@ fn main() -> Result<()> {
 
     // Diagnostics cannot go to the screen once the TUI owns it.
     if let Some(p) = value("--log-file") {
-        if let Ok(f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+        if let Ok(f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&p)
+        {
             tracing_subscriber::fmt()
                 .with_writer(std::sync::Mutex::new(f))
                 .with_ansi(false)
@@ -211,7 +227,10 @@ mod doctor {
     /// Report what works and what does not, so a broken setup is diagnosed
     /// rather than guessed at.
     pub fn run() -> Result<()> {
-        println!("ytmtui {} \u{2014} environment check\n", env!("CARGO_PKG_VERSION"));
+        println!(
+            "ytmtui {} \u{2014} environment check\n",
+            env!("CARGO_PKG_VERSION")
+        );
 
         println!("required tools:");
         match tool("ffmpeg", &["-version"]) {
@@ -240,19 +259,28 @@ mod doctor {
         }
 
         println!("\nterminal:");
-        ok("TERM", std::env::var("TERM").unwrap_or_else(|_| "<unset>".into()));
+        ok(
+            "TERM",
+            std::env::var("TERM").unwrap_or_else(|_| "<unset>".into()),
+        );
         let colorterm = std::env::var("COLORTERM").unwrap_or_default();
         if colorterm.contains("truecolor") || colorterm.contains("24bit") {
             ok("colour", "truecolor".into());
         } else {
-            bad("colour", "no truecolor detected - the spectrum gradient will band");
+            bad(
+                "colour",
+                "no truecolor detected - the spectrum gradient will band",
+            );
         }
 
         println!("\nconfig:");
         let loaded = ytm_config::load();
         match &loaded.path {
             Some(p) if p.exists() => ok("config file", p.display().to_string()),
-            Some(p) => ok("config file", format!("{} (not present, using defaults)", p.display())),
+            Some(p) => ok(
+                "config file",
+                format!("{} (not present, using defaults)", p.display()),
+            ),
             None => bad("config file", "no config directory"),
         }
         ok("bindings", format!("{} active", loaded.keymap.len()));

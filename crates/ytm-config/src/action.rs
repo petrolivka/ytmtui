@@ -159,20 +159,58 @@ impl Action {
     pub const ALL: &'static [Action] = {
         use Action::*;
         &[
-            Search, Activate, Back,
-            TogglePause, Next, Prev,
-            SeekForward, SeekBackward, SeekForwardLong, SeekBackwardLong,
-            VolumeUp, VolumeDown,
-            ToggleShuffle, CycleRepeat, StartRadio, ToggleAutoplay,
-            SpeedUp, SpeedDown, SpeedReset, ToggleNormalize,
-            PlayNext, Enqueue, RemoveFromQueue,
-            ThumbsUp, ThumbsDown, ToggleLibrary,
-            AddToPlaylist, NewPlaylist, RenamePlaylist, DeletePlaylist,
-            RemoveFromPlaylist, ToggleSubscribe, CopyLink,
-            GoToArtist, GoToAlbum, NextTab, PrevTab,
-            NextPane, PrevPane, Up, Down, PageUp, PageDown, Top, Bottom,
-            CycleVisualizer, ToggleVisualizerFullscreen, ToggleLyrics, ToggleArt,
-            CommandPalette, Help, Quit,
+            Search,
+            Activate,
+            Back,
+            TogglePause,
+            Next,
+            Prev,
+            SeekForward,
+            SeekBackward,
+            SeekForwardLong,
+            SeekBackwardLong,
+            VolumeUp,
+            VolumeDown,
+            ToggleShuffle,
+            CycleRepeat,
+            StartRadio,
+            ToggleAutoplay,
+            SpeedUp,
+            SpeedDown,
+            SpeedReset,
+            ToggleNormalize,
+            PlayNext,
+            Enqueue,
+            RemoveFromQueue,
+            ThumbsUp,
+            ThumbsDown,
+            ToggleLibrary,
+            AddToPlaylist,
+            NewPlaylist,
+            RenamePlaylist,
+            DeletePlaylist,
+            RemoveFromPlaylist,
+            ToggleSubscribe,
+            CopyLink,
+            GoToArtist,
+            GoToAlbum,
+            NextTab,
+            PrevTab,
+            NextPane,
+            PrevPane,
+            Up,
+            Down,
+            PageUp,
+            PageDown,
+            Top,
+            Bottom,
+            CycleVisualizer,
+            ToggleVisualizerFullscreen,
+            ToggleLyrics,
+            ToggleArt,
+            CommandPalette,
+            Help,
+            Quit,
         ]
     };
 }
@@ -180,6 +218,17 @@ impl Action {
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.label())
+    }
+}
+
+/// Parse the snake_case name used in the config file.
+impl FromStr for Action {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde::Deserialize::deserialize(
+            serde::de::value::StrDeserializer::<serde::de::value::Error>::new(s),
+        )
+        .map_err(|_| format!("unknown action '{s}'"))
     }
 }
 
@@ -218,18 +267,11 @@ mod tests {
             let n = a.name();
             assert!(!n.is_empty(), "{a:?} has no name");
             assert!(n.contains(|c: char| c.is_ascii_lowercase()));
-            assert_eq!(Action::from_str(&n).unwrap(), *a, "name {n} did not round-trip");
+            assert_eq!(
+                Action::from_str(&n).unwrap(),
+                *a,
+                "name {n} did not round-trip"
+            );
         }
-    }
-}
-
-/// Parse the snake_case name used in the config file.
-impl FromStr for Action {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        serde::Deserialize::deserialize(serde::de::value::StrDeserializer::<
-            serde::de::value::Error,
-        >::new(s))
-        .map_err(|_| format!("unknown action '{s}'"))
     }
 }

@@ -6,11 +6,13 @@
 
 use anyhow::Result;
 use arc_swap::ArcSwap;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{
+    self, Event, KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::layout::Rect;
 use std::cell::{Cell, RefCell};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -53,7 +55,11 @@ pub struct TrackState {
 
 pub enum AppEvent {
     /// Content for a view, tagged with the request that asked for it.
-    Loaded { generation: u64, append: bool, result: Result<ytm_api::RowPage, String> },
+    Loaded {
+        generation: u64,
+        append: bool,
+        result: Result<ytm_api::RowPage, String>,
+    },
     Radio(Result<Vec<Track>, String>),
     RadioFrom(Track, Result<Vec<Track>, String>),
     TrackState(VideoId, TrackState),
@@ -256,12 +262,15 @@ impl App {
         if !self.config.general.restore_session {
             return;
         }
-        let Some(s) = crate::session::load() else { return };
+        let Some(s) = crate::session::load() else {
+            return;
+        };
         if s.queue.is_empty() {
             return;
         }
         let n = s.queue.len();
-        self.player.send(PCmd::SetVolume(if s.volume > 0.0 { s.volume } else { 1.0 }));
+        self.player
+            .send(PCmd::SetVolume(if s.volume > 0.0 { s.volume } else { 1.0 }));
         self.player.send(PCmd::RestoreQueue {
             tracks: s.queue,
             index: s.index,
@@ -345,11 +354,15 @@ impl App {
 
     /// Pull the next page in when the cursor nears the end of the list (FR-B4).
     fn maybe_load_more(&mut self) {
-        let Some(p) = self.stack.last_mut() else { return };
+        let Some(p) = self.stack.last_mut() else {
+            return;
+        };
         if p.loading || p.loading_more || p.rows.is_empty() {
             return;
         }
-        let Some(token) = p.continuation.clone() else { return };
+        let Some(token) = p.continuation.clone() else {
+            return;
+        };
         if p.sel + 12 < p.rows.len() {
             return;
         }
@@ -359,14 +372,22 @@ impl App {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let r = b.continue_rows(&token).map_err(|e| e.to_string());
-            let _ = tx.send(AppEvent::Loaded { generation, append: true, result: r });
+            let _ = tx.send(AppEvent::Loaded {
+                generation,
+                append: true,
+                result: r,
+            });
         });
     }
 
     /// Open whatever the cursor is on.
     fn activate(&mut self) {
-        let Some(page) = self.stack.last() else { return };
-        let Some(row) = page.selected().cloned() else { return };
+        let Some(page) = self.stack.last() else {
+            return;
+        };
+        let Some(row) = page.selected().cloned() else {
+            return;
+        };
         match row {
             Row::Header(_) => {}
             Row::Track(_) => {
@@ -390,13 +411,24 @@ impl App {
             self.toast("no track selected".into());
             return;
         };
-        let target = if artist { t.artist_id.clone() } else { t.album_id.clone() };
+        let target = if artist {
+            t.artist_id.clone()
+        } else {
+            t.album_id.clone()
+        };
         match target {
             Some(id) if artist => self.push(View::Artist(id, t.artist.clone())),
-            Some(id) => self.push(View::Album(id, t.album.clone().unwrap_or_else(|| t.title.clone()))),
+            Some(id) => self.push(View::Album(
+                id,
+                t.album.clone().unwrap_or_else(|| t.title.clone()),
+            )),
             None => self.toast(
-                if artist { "no artist link on this track" } else { "no album link on this track" }
-                    .into(),
+                if artist {
+                    "no artist link on this track"
+                } else {
+                    "no album link on this track"
+                }
+                .into(),
             ),
         }
     }
@@ -406,7 +438,11 @@ impl App {
     pub fn tick(&mut self) {
         while let Ok(ev) = self.rx.try_recv() {
             match ev {
-                AppEvent::Loaded { generation, append, result } => {
+                AppEvent::Loaded {
+                    generation,
+                    append,
+                    result,
+                } => {
                     // Ignore anything a newer navigation has superseded.
                     let Some(p) = self.stack.iter_mut().find(|p| p.generation == generation) else {
                         continue;
@@ -464,7 +500,10 @@ impl App {
                             let mut q = vec![seed];
                             q.extend(more);
                             self.toast(format!("radio from {title} ({} tracks)", q.len()));
-                            self.player.send(PCmd::PlayQueue { tracks: q, index: 0 });
+                            self.player.send(PCmd::PlayQueue {
+                                tracks: q,
+                                index: 0,
+                            });
                         }
                         Err(e) => self.toast(format!("radio failed: {e}")),
                     }
@@ -486,7 +525,10 @@ impl App {
                     }
                 }
                 AppEvent::Playlists(r) => {
-                    if let Some(Modal::PlaylistPicker { playlists, loading, .. }) = &mut self.modal {
+                    if let Some(Modal::PlaylistPicker {
+                        playlists, loading, ..
+                    }) = &mut self.modal
+                    {
                         *loading = false;
                         match r {
                             Ok(p) => *playlists = p,
@@ -541,7 +583,10 @@ impl App {
             return;
         }
         self.prev_track = cur.clone();
-        self.now = TrackState { id: cur.clone(), ..Default::default() };
+        self.now = TrackState {
+            id: cur.clone(),
+            ..Default::default()
+        };
         self.lyrics = None;
         self.lyrics_synced = None;
         self.lyrics_scroll = 0;
@@ -562,7 +607,13 @@ impl App {
             if let Ok((rating, add, remove, in_library)) = b.track_state(&id) {
                 let _ = tx.send(AppEvent::TrackState(
                     id.clone(),
-                    TrackState { id: Some(id), rating, in_library, token_add: add, token_remove: remove },
+                    TrackState {
+                        id: Some(id),
+                        rating,
+                        in_library,
+                        token_add: add,
+                        token_remove: remove,
+                    },
                 ));
             }
         });
@@ -570,7 +621,9 @@ impl App {
 
     /// Tell ListenBrainz what is on, and arm the listen for later.
     fn start_scrobble(&mut self) {
-        let Some(sc) = self.scrobbler.clone() else { return };
+        let Some(sc) = self.scrobbler.clone() else {
+            return;
+        };
         let Some(t) = self.player.status().current.clone() else {
             self.scrobble = None;
             return;
@@ -589,10 +642,14 @@ impl App {
 
     /// Submit the listen once enough of the track has played.
     fn poll_scrobble(&mut self) {
-        let Some(sc) = self.scrobbler.clone() else { return };
+        let Some(sc) = self.scrobbler.clone() else {
+            return;
+        };
         let st = self.player.status();
         let Some(t) = st.current.clone() else { return };
-        let Some((id, started, submitted)) = self.scrobble.clone() else { return };
+        let Some((id, started, submitted)) = self.scrobble.clone() else {
+            return;
+        };
         if submitted || id != t.id {
             return;
         }
@@ -613,11 +670,17 @@ impl App {
         if !self.config.general.notifications {
             return;
         }
-        let Some(t) = self.player.status().current.clone() else { return };
+        let Some(t) = self.player.status().current.clone() else {
+            return;
+        };
         // Off the UI thread: spawning a notifier can block for a moment.
         std::thread::spawn(move || {
             let body = if t.album.is_some() {
-                format!("{}  \u{2022}  {}", t.artist, t.album.clone().unwrap_or_default())
+                format!(
+                    "{}  \u{2022}  {}",
+                    t.artist,
+                    t.album.clone().unwrap_or_default()
+                )
             } else {
                 t.artist.clone()
             };
@@ -654,7 +717,8 @@ impl App {
 
     fn maybe_autoplay(&mut self) {
         let st = self.player.status();
-        let stopped_just_now = self.prev_state == PlayState::Playing && st.state == PlayState::Stopped;
+        let stopped_just_now =
+            self.prev_state == PlayState::Playing && st.state == PlayState::Stopped;
         self.prev_state = st.state;
         if !stopped_just_now || !self.autoplay || self.radio_pending {
             return;
@@ -662,7 +726,9 @@ impl App {
         if st.queue.is_empty() || st.queue_index + 1 < st.queue.len() {
             return;
         }
-        let Some(seed) = st.queue.get(st.queue_index).cloned() else { return };
+        let Some(seed) = st.queue.get(st.queue_index).cloned() else {
+            return;
+        };
         self.radio_pending = true;
         self.toast("queue finished - starting radio\u{2026}".into());
         let b = self.backend.clone();
@@ -674,7 +740,9 @@ impl App {
     }
 
     fn start_radio_from_selection(&mut self) {
-        let Some(seed) = self.selected_track().or_else(|| self.player.status().current.clone())
+        let Some(seed) = self
+            .selected_track()
+            .or_else(|| self.player.status().current.clone())
         else {
             self.toast("nothing selected".into());
             return;
@@ -838,8 +906,15 @@ impl App {
         };
         let all = SearchFilter::ALL;
         let i = all.iter().position(|f| f == filter).unwrap_or(0);
-        let next = if forward { (i + 1) % all.len() } else { (i + all.len() - 1) % all.len() };
-        let view = View::Search { query: query.clone(), filter: all[next] };
+        let next = if forward {
+            (i + 1) % all.len()
+        } else {
+            (i + all.len() - 1) % all.len()
+        };
+        let view = View::Search {
+            query: query.clone(),
+            filter: all[next],
+        };
         self.stack.pop();
         self.push(view);
     }
@@ -893,7 +968,9 @@ impl App {
             return;
         }
         let Some(chord) = chord_of(k) else { return };
-        let Some(action) = self.keymap.get(&chord).copied() else { return };
+        let Some(action) = self.keymap.get(&chord).copied() else {
+            return;
+        };
         self.do_action(action);
     }
 
@@ -1030,7 +1107,9 @@ impl App {
     }
 
     fn modal_key(&mut self, k: KeyEvent) {
-        let Some(modal) = self.modal.as_mut() else { return };
+        let Some(modal) = self.modal.as_mut() else {
+            return;
+        };
         match modal {
             Modal::Palette { query, sel } => match k.code {
                 KeyCode::Esc => self.modal = None,
@@ -1054,18 +1133,25 @@ impl App {
                 }
                 _ => {}
             },
-            Modal::PlaylistPicker { playlists, sel, track, .. } => match k.code {
+            Modal::PlaylistPicker {
+                playlists,
+                sel,
+                track,
+                ..
+            } => match k.code {
                 KeyCode::Esc => self.modal = None,
                 KeyCode::Up => *sel = sel.saturating_sub(1),
                 KeyCode::Down => *sel = (*sel + 1).min(playlists.len()),
                 KeyCode::Enter => {
-                    let t = track.clone();
+                    let t = (**track).clone();
                     // Index 0 is always "new playlist"; the rest are existing ones.
                     if *sel == 0 {
                         self.modal = Some(Modal::Text {
                             title: "new playlist".into(),
                             value: String::new(),
-                            prompt: Prompt::NewPlaylist { then_add: Some(t) },
+                            prompt: Prompt::NewPlaylist {
+                                then_add: Some(Box::new(t)),
+                            },
                         });
                     } else {
                         let target = playlists.get(*sel - 1).cloned();
@@ -1152,7 +1238,9 @@ impl App {
 
     fn add_to_playlist(&mut self, p: PlaylistRef, t: Track) {
         let Some(pid) = p.playlist_id.clone().or_else(|| {
-            p.id.0.strip_prefix("VL").map(|x| ytm_core::PlaylistId(x.to_string()))
+            p.id.0
+                .strip_prefix("VL")
+                .map(|x| ytm_core::PlaylistId(x.to_string()))
         }) else {
             self.toast("that playlist has no usable id".into());
             return;
@@ -1170,7 +1258,9 @@ impl App {
     }
 
     fn open_playlist_picker(&mut self) {
-        let Some(track) = self.selected_track().or_else(|| self.player.status().current.clone())
+        let Some(track) = self
+            .selected_track()
+            .or_else(|| self.player.status().current.clone())
         else {
             self.toast("nothing selected".into());
             return;
@@ -1180,7 +1270,7 @@ impl App {
             return;
         }
         self.modal = Some(Modal::PlaylistPicker {
-            track,
+            track: Box::new(track),
             playlists: Vec::new(),
             sel: 0,
             loading: true,
@@ -1210,11 +1300,10 @@ impl App {
         let p = self.page()?;
         match &p.view {
             View::Playlist(id, title) => {
-                let pid = id
-                    .0
-                    .strip_prefix("VL")
-                    .map(|x| ytm_core::PlaylistId(x.to_string()))
-                    .unwrap_or_else(|| ytm_core::PlaylistId(id.0.clone()));
+                let pid =
+                    id.0.strip_prefix("VL")
+                        .map(|x| ytm_core::PlaylistId(x.to_string()))
+                        .unwrap_or_else(|| ytm_core::PlaylistId(id.0.clone()));
                 Some((pid, title.clone()))
             }
             _ => None,
@@ -1300,7 +1389,10 @@ impl App {
                 self.query.clear();
             }
             CommandPalette => {
-                self.modal = Some(Modal::Palette { query: String::new(), sel: 0 })
+                self.modal = Some(Modal::Palette {
+                    query: String::new(),
+                    sel: 0,
+                })
             }
             NextPane => {
                 self.focus = match self.focus {
@@ -1376,7 +1468,10 @@ impl App {
             ToggleNormalize => {
                 let on = !self.player.status().normalize;
                 self.player.send(PCmd::ToggleNormalize);
-                self.toast(format!("loudness levelling {}", if on { "on" } else { "off" }));
+                self.toast(format!(
+                    "loudness levelling {}",
+                    if on { "on" } else { "off" }
+                ));
             }
             CycleRepeat => self.player.send(PCmd::CycleRepeat),
             StartRadio => self.start_radio_from_selection(),
@@ -1467,7 +1562,10 @@ impl App {
     /// Put a share link on the clipboard, falling back to showing it if no
     /// clipboard tool is available (headless, or over plain SSH).
     fn copy_link(&mut self) {
-        let Some(t) = self.selected_track().or_else(|| self.player.status().current.clone()) else {
+        let Some(t) = self
+            .selected_track()
+            .or_else(|| self.player.status().current.clone())
+        else {
             self.toast("nothing selected".into());
             return;
         };
@@ -1561,9 +1659,12 @@ impl App {
 
     fn seek_to_fraction(&mut self, f: f64) {
         let st = self.player.status();
-        let Some(total) = st.current.as_ref().and_then(|t| t.duration) else { return };
+        let Some(total) = st.current.as_ref().and_then(|t| t.duration) else {
+            return;
+        };
         let target = total.as_secs_f64() * f.clamp(0.0, 1.0);
-        self.player.send(PCmd::SeekRelative(target - st.position.as_secs_f64()));
+        self.player
+            .send(PCmd::SeekRelative(target - st.position.as_secs_f64()));
     }
 
     pub fn shutdown(&self) {

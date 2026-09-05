@@ -9,14 +9,23 @@ use ytm_core::{PlaylistRef, Track};
 /// What a text prompt does with its answer.
 #[derive(Debug, Clone)]
 pub enum Prompt {
-    NewPlaylist { then_add: Option<Track> },
-    RenamePlaylist { id: ytm_core::PlaylistId },
+    /// Boxed: a Track dwarfs the other variants, and the enum is moved around
+    /// on every keystroke while a prompt is open.
+    NewPlaylist {
+        then_add: Option<Box<Track>>,
+    },
+    RenamePlaylist {
+        id: ytm_core::PlaylistId,
+    },
 }
 
 /// What a confirmation, if accepted, will do.
 #[derive(Debug, Clone)]
 pub enum Confirm {
-    DeletePlaylist { id: ytm_core::PlaylistId, title: String },
+    DeletePlaylist {
+        id: ytm_core::PlaylistId,
+        title: String,
+    },
 }
 
 pub enum Modal {
@@ -25,7 +34,9 @@ pub enum Modal {
         sel: usize,
     },
     PlaylistPicker {
-        track: Track,
+        /// Boxed for the same reason as in `Prompt`: the modal is moved on
+        /// every keystroke and a Track dwarfs the other variants.
+        track: Box<Track>,
         playlists: Vec<PlaylistRef>,
         sel: usize,
         loading: bool,
@@ -57,7 +68,11 @@ impl Modal {
 /// Matching is subsequence-based so "adpl" finds "Add to playlist" - typing
 /// initials is how these are actually used.
 pub fn filter_actions(query: &str) -> Vec<Action> {
-    let q: String = query.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
+    let q: String = query
+        .to_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
     if q.is_empty() {
         return Action::ALL.to_vec();
     }
@@ -94,7 +109,11 @@ mod tests {
     #[test]
     fn matches_initials_and_substrings() {
         let r = filter_actions("addpl");
-        assert!(r.contains(&Action::AddToPlaylist), "got {:?}", &r[..r.len().min(3)]);
+        assert!(
+            r.contains(&Action::AddToPlaylist),
+            "got {:?}",
+            &r[..r.len().min(3)]
+        );
         let r = filter_actions("shuffle");
         assert_eq!(r.first(), Some(&Action::ToggleShuffle));
     }
@@ -127,8 +146,17 @@ mod more_tests {
 
     #[test]
     fn speed_actions_are_in_the_catalogue() {
-        assert!(Action::ALL.contains(&Action::SpeedUp), "SpeedUp missing from ALL");
-        assert!(Action::ALL.contains(&Action::ToggleNormalize), "ToggleNormalize missing");
-        assert!(Action::ALL.contains(&Action::ToggleArt), "ToggleArt missing");
+        assert!(
+            Action::ALL.contains(&Action::SpeedUp),
+            "SpeedUp missing from ALL"
+        );
+        assert!(
+            Action::ALL.contains(&Action::ToggleNormalize),
+            "ToggleNormalize missing"
+        );
+        assert!(
+            Action::ALL.contains(&Action::ToggleArt),
+            "ToggleArt missing"
+        );
     }
 }

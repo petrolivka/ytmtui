@@ -82,7 +82,8 @@ impl Player {
     }
     fn set_position(&self, _track: ObjectPath<'_>, position: i64) {
         let now = self.handle.status().position.as_secs_f64();
-        self.handle.send(Command::SeekRelative(position as f64 / 1e6 - now));
+        self.handle
+            .send(Command::SeekRelative(position as f64 / 1e6 - now));
     }
     fn open_uri(&self, _uri: String) {}
 
@@ -131,7 +132,8 @@ impl Player {
 
     #[zbus(property)]
     fn set_volume(&self, v: f64) {
-        self.handle.send(Command::SetVolume(v.clamp(0.0, 1.5) as f32));
+        self.handle
+            .send(Command::SetVolume(v.clamp(0.0, 1.5) as f32));
     }
 
     /// Position in microseconds.
@@ -149,12 +151,11 @@ impl Player {
         };
         // The track id must be a valid object path, so the video id is escaped
         // into one rather than used directly.
-        let safe: String = t
-            .id
-            .0
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect();
+        let safe: String =
+            t.id.0
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
         if let Ok(p) = ObjectPath::try_from(format!("/org/mpris/MediaPlayer2/Track/{safe}")) {
             m.insert("mpris:trackid".into(), Value::from(p));
         }

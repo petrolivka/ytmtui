@@ -68,9 +68,12 @@ impl StreamResolver for YtDlpResolver {
         let sel = self.itag_preference.join("/");
         let out = Command::new("yt-dlp")
             .args([
-                "--no-warnings", "--quiet",
-                "-f", &sel,
-                "--print", "%(format_id)s\t%(acodec)s\t%(abr)s\t%(urls)s",
+                "--no-warnings",
+                "--quiet",
+                "-f",
+                &sel,
+                "--print",
+                "%(format_id)s\t%(acodec)s\t%(abr)s\t%(urls)s",
                 &url,
             ])
             .output()

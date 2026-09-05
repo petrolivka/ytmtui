@@ -23,7 +23,9 @@ impl View {
             View::Home => "Home".into(),
             View::Explore(s) => s.label().into(),
             View::Library(s) => s.label().into(),
-            View::Search { query, filter } => format!("Search: {query} \u{2022} {}", filter.label()),
+            View::Search { query, filter } => {
+                format!("Search: {query} \u{2022} {}", filter.label())
+            }
             View::Artist(_, name) => name.clone(),
             View::Album(_, name) => name.clone(),
             View::Playlist(_, name) => name.clone(),
@@ -114,7 +116,11 @@ impl Page {
         if self.rows.get(self.sel).map(|r| r.is_selectable()) == Some(true) {
             return;
         }
-        self.sel = self.rows.iter().position(|r| r.is_selectable()).unwrap_or(0);
+        self.sel = self
+            .rows
+            .iter()
+            .position(|r| r.is_selectable())
+            .unwrap_or(0);
     }
 
     /// Every playable row, and where the given index sits among them - so

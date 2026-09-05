@@ -121,7 +121,8 @@ pub fn resize_for_cells(img: &RgbImage, cols: u16, rows: u16) -> RgbImage {
 /// Kitty graphics protocol: a base64 PNG delivered in chunks.
 pub fn to_kitty(img: &RgbImage, cols: u16, rows: u16) -> Result<String> {
     use base64::Engine;
-    let scaled = image::imageops::resize(img, cols as u32 * 8, rows as u32 * 16, FilterType::Triangle);
+    let scaled =
+        image::imageops::resize(img, cols as u32 * 8, rows as u32 * 16, FilterType::Triangle);
     let mut png = Vec::new();
     image::codecs::png::PngEncoder::new(&mut png)
         .write_image(
@@ -183,7 +184,10 @@ impl ArtCache {
     }
 
     pub fn has(&self, url: &str) -> bool {
-        self.images.lock().map(|m| m.contains_key(url)).unwrap_or(false)
+        self.images
+            .lock()
+            .map(|m| m.contains_key(url))
+            .unwrap_or(false)
     }
 
     /// Fetch and decode, remembering failures too so a broken URL is not
@@ -269,7 +273,10 @@ mod tests {
             "https://lh3.googleusercontent.com/abc=w256-h256-l90-rj"
         );
         // Anything else is left alone rather than mangled.
-        assert_eq!(at_size("https://example.com/a.jpg", 256), "https://example.com/a.jpg");
+        assert_eq!(
+            at_size("https://example.com/a.jpg", 256),
+            "https://example.com/a.jpg"
+        );
     }
 
     #[test]

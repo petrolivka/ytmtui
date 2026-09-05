@@ -83,8 +83,11 @@ impl ExploreSection {
             ExploreSection::Explore => "Explore",
         }
     }
-    pub const ALL: [ExploreSection; 3] =
-        [ExploreSection::Explore, ExploreSection::NewReleases, ExploreSection::Charts];
+    pub const ALL: [ExploreSection; 3] = [
+        ExploreSection::Explore,
+        ExploreSection::NewReleases,
+        ExploreSection::Charts,
+    ];
 }
 
 /// A library section, addressed by its InnerTube browse id.
@@ -187,7 +190,10 @@ impl Innertube {
             .join("; ");
         Ok(Self {
             http: client()?,
-            auth: Some(Auth { cookie_header, sapisid }),
+            auth: Some(Auth {
+                cookie_header,
+                sapisid,
+            }),
             cache: Mutex::new(HashMap::new()),
             last_request: Mutex::new(None),
         })
@@ -217,7 +223,10 @@ impl Innertube {
             }
         }
         let v = self.post(endpoint, body)?;
-        self.cache.lock().unwrap().insert(key, (Instant::now(), v.clone()));
+        self.cache
+            .lock()
+            .unwrap()
+            .insert(key, (Instant::now(), v.clone()));
         Ok(v)
     }
 
@@ -274,7 +283,10 @@ impl Innertube {
             );
         }
         if !status.is_success() {
-            bail!("{endpoint} -> HTTP {status}: {}", &text[..text.len().min(240)]);
+            bail!(
+                "{endpoint} -> HTTP {status}: {}",
+                &text[..text.len().min(240)]
+            );
         }
         Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
     }
@@ -290,7 +302,11 @@ impl Innertube {
         )?;
         let rows = parse::page_rows(&v);
         if !rows.is_empty() {
-            return Ok(RowPage { title: None, rows, continuation: parse::continuation(&v) });
+            return Ok(RowPage {
+                title: None,
+                rows,
+                continuation: parse::continuation(&v),
+            });
         }
         // The filter blob may have gone stale; unfiltered beats empty.
         let v = self.get("search", json!({ "query": query }), TTL_SEARCH)?;
@@ -327,7 +343,11 @@ impl Innertube {
         if rows.is_empty() {
             rows = parse::flat_rows(&v);
         }
-        Ok(RowPage { title: None, rows, continuation: parse::continuation(&v) })
+        Ok(RowPage {
+            title: None,
+            rows,
+            continuation: parse::continuation(&v),
+        })
     }
 
     /// Fetch an arbitrary browse id. Used by the `probe` diagnostic to find
@@ -352,7 +372,11 @@ impl Innertube {
         if rows.is_empty() {
             rows = parse::flat_rows(&v);
         }
-        Ok(RowPage { title: page_title(&v), rows, continuation: parse::continuation(&v) })
+        Ok(RowPage {
+            title: page_title(&v),
+            rows,
+            continuation: parse::continuation(&v),
+        })
     }
 
     /// Radio / autoplay queue seeded from a track, i.e. what the official
@@ -410,7 +434,11 @@ impl Innertube {
                 }
             }
         }
-        Ok(RowPage { title: page_title(&v), rows, continuation: parse::continuation(&v) })
+        Ok(RowPage {
+            title: page_title(&v),
+            rows,
+            continuation: parse::continuation(&v),
+        })
     }
 
     /// A playlist page. Accepts either a browse id ("VL...") or a raw
@@ -426,12 +454,22 @@ impl Innertube {
         if rows.is_empty() {
             rows = parse::page_rows(&v);
         }
-        Ok(RowPage { title: page_title(&v), rows, continuation: parse::continuation(&v) })
+        Ok(RowPage {
+            title: page_title(&v),
+            rows,
+            continuation: parse::continuation(&v),
+        })
     }
 
     /// Time-synced lyrics from LRCLIB, which YouTube Music does not provide.
     pub fn synced_lyrics(&self, t: &Track) -> Result<Option<Vec<crate::lrclib::Line>>> {
-        crate::lrclib::fetch(&self.http, &t.artist, &t.title, t.album.as_deref(), t.duration)
+        crate::lrclib::fetch(
+            &self.http,
+            &t.artist,
+            &t.title,
+            t.album.as_deref(),
+            t.duration,
+        )
     }
 
     /// Search-as-you-type suggestions.
@@ -483,7 +521,10 @@ impl Innertube {
 
     /// The true rating and library state for a track (FR-R7), so the UI shows
     /// what the account actually holds rather than a guess.
-    pub fn track_state(&self, id: &VideoId) -> Result<(Rating, Option<String>, Option<String>, bool)> {
+    pub fn track_state(
+        &self,
+        id: &VideoId,
+    ) -> Result<(Rating, Option<String>, Option<String>, bool)> {
         let v = self.watch_next(id)?;
 
         // The rating of the *current* track lives in the player overlay, not in
@@ -513,6 +554,19 @@ impl Innertube {
             None => (None, None, false),
         };
         Ok((rating, add, remove, in_library))
+    }
+
+    /// Raw browse response, for capturing test fixtures.
+    pub fn debug_browse(&self, browse_id: &str) -> Result<Value> {
+        self.post("browse", json!({ "browseId": browse_id }))
+    }
+
+    /// Raw search response, for capturing test fixtures.
+    pub fn debug_search(&self, query: &str, filter: SearchFilter) -> Result<Value> {
+        self.post(
+            "search",
+            json!({ "query": query, "params": filter.params() }),
+        )
     }
 
     /// Raw watch-next response, for diagnostics.
@@ -593,7 +647,12 @@ impl Innertube {
 
     /// Removing needs both ids: the video id and the id identifying that entry
     /// *within this playlist*.
-    pub fn playlist_remove(&self, id: &PlaylistId, video: &VideoId, set_video_id: &str) -> Result<()> {
+    pub fn playlist_remove(
+        &self,
+        id: &PlaylistId,
+        video: &VideoId,
+        set_video_id: &str,
+    ) -> Result<()> {
         self.require_auth()?;
         self.post(
             "browse/edit_playlist",
@@ -619,7 +678,11 @@ impl Innertube {
 
     pub fn set_subscribed(&self, channel: &BrowseId, subscribed: bool) -> Result<()> {
         self.require_auth()?;
-        let endpoint = if subscribed { "subscription/subscribe" } else { "subscription/unsubscribe" };
+        let endpoint = if subscribed {
+            "subscription/subscribe"
+        } else {
+            "subscription/unsubscribe"
+        };
         self.post(endpoint, json!({ "channelIds": [channel.0] }))?;
         self.invalidate_library();
         Ok(())
@@ -689,14 +752,20 @@ fn page_artist(v: &Value) -> Option<String> {
 
 /// Best-effort page heading for an artist/album/playlist response.
 fn page_title(v: &Value) -> Option<String> {
-    for key in ["musicDetailHeaderRenderer", "musicImmersiveHeaderRenderer", "musicResponsiveHeaderRenderer"] {
+    for key in [
+        "musicDetailHeaderRenderer",
+        "musicImmersiveHeaderRenderer",
+        "musicResponsiveHeaderRenderer",
+    ] {
         if let Some(h) = json::find(v, key) {
             if let Some(t) = h.get("title").and_then(json::text) {
                 return Some(t);
             }
         }
     }
-    json::find(v, "header").and_then(|h| json::find(h, "title")).and_then(json::text)
+    json::find(v, "header")
+        .and_then(|h| json::find(h, "title"))
+        .and_then(json::text)
 }
 
 fn client() -> Result<reqwest::blocking::Client> {

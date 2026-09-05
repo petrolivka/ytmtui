@@ -111,10 +111,18 @@ pub enum Rating {
 impl Rating {
     /// What pressing thumbs-up should produce, given the current state.
     pub fn toggled_like(self) -> Self {
-        if self == Rating::Like { Rating::Indifferent } else { Rating::Like }
+        if self == Rating::Like {
+            Rating::Indifferent
+        } else {
+            Rating::Like
+        }
     }
     pub fn toggled_dislike(self) -> Self {
-        if self == Rating::Dislike { Rating::Indifferent } else { Rating::Dislike }
+        if self == Rating::Dislike {
+            Rating::Indifferent
+        } else {
+            Rating::Dislike
+        }
     }
     pub fn glyph(self) -> &'static str {
         match self {

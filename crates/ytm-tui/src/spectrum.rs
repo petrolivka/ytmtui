@@ -96,11 +96,7 @@ impl Spectrum<'_> {
     fn bars(&self, area: Rect, buf: &mut Buffer, mirrored: bool) {
         let h = area.height as usize;
         let step = self.step.max(1);
-        let n = self
-            .frame
-            .bands
-            .len()
-            .min((area.width / step) as usize);
+        let n = self.frame.bands.len().min((area.width / step) as usize);
 
         // Reserve a baseline row so the two halves never touch, and give the
         // real bars two thirds of the height - an even split makes the
@@ -127,7 +123,11 @@ impl Spectrum<'_> {
                 if level == 0 {
                     continue; // leave empty cells untouched so caps can show
                 }
-                let t = if top > 1 { row as f32 / (top - 1) as f32 } else { 0.0 };
+                let t = if top > 1 {
+                    row as f32 / (top - 1) as f32
+                } else {
+                    0.0
+                };
                 if let Some(cell) = buf.cell_mut((x, y)) {
                     cell.set_char(BLOCKS[level]).set_fg(self.theme.grad(t));
                 }
@@ -155,7 +155,11 @@ impl Spectrum<'_> {
                     if level == 0 {
                         continue;
                     }
-                    let t = if bottom > 1 { row as f32 / (bottom - 1) as f32 } else { 0.0 };
+                    let t = if bottom > 1 {
+                        row as f32 / (bottom - 1) as f32
+                    } else {
+                        0.0
+                    };
                     if let Some(cell) = buf.cell_mut((x, y)) {
                         cell.set_char(BLOCKS[level])
                             .set_fg(dim(self.theme.grad(t), REFLECT_DIM));

@@ -110,11 +110,17 @@ mod tests {
         let three = Duration::from_secs(180);
         // Half of a 6-minute track.
         assert!(should_submit(three, Some(Duration::from_secs(360))));
-        assert!(!should_submit(Duration::from_secs(100), Some(Duration::from_secs(360))));
+        assert!(!should_submit(
+            Duration::from_secs(100),
+            Some(Duration::from_secs(360))
+        ));
         // Four minutes always counts, however long the track.
         assert!(should_submit(four_min, Some(Duration::from_secs(3600))));
         // A track under 30 seconds is not scrobbleable.
-        assert!(!should_submit(Duration::from_secs(20), Some(Duration::from_secs(25))));
+        assert!(!should_submit(
+            Duration::from_secs(20),
+            Some(Duration::from_secs(25))
+        ));
         // Unknown duration falls back to the four-minute rule alone.
         assert!(!should_submit(three, None));
         assert!(should_submit(four_min, None));

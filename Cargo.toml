@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/*"]
-exclude = ["spike"]
+exclude = ["spike", "fuzz"]
 resolver = "2"
 
 [workspace.package]
@@ -8,6 +8,14 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 license = "GPL-3.0-or-later"
+
+# A release binary people install, not a dev build: optimise for size and speed
+# over compile time.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "unwind"   # the panic hook restores the terminal; abort would not run it
+strip = "symbols"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -33,6 +41,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "A YouTube Music client for the terminal, with a live audio spectrum"
+repository = "https://github.com/petrolivka/ytmtui"
+readme = "README.md"
+keywords = ["music", "terminal", "tui", "youtube", "player"]
+categories = ["command-line-utilities", "multimedia::audio"]
+
+# cargo-binstall: fetch a prebuilt binary from a release instead of compiling.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+pkg-fmt = "tgz"
 
 [[bin]]
 name = "ytmtui"
@@ -41,6 +58,10 @@ path = "src/main.rs"
 [[bin]]
 name = "tune"
 path = "src/bin/tune.rs"
+
+[[bin]]
+name = "dump-fixtures"
+path = "src/bin/dump-fixtures.rs"
 
 [[bin]]
 name = "probe"

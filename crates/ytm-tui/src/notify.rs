@@ -22,7 +22,15 @@ pub fn track_changed(title: &str, body: &str) {
                 body.into(),
             ],
         ),
-        ("terminal-notifier", vec!["-title".into(), title.into(), "-message".into(), body.into()]),
+        (
+            "terminal-notifier",
+            vec![
+                "-title".into(),
+                title.into(),
+                "-message".into(),
+                body.into(),
+            ],
+        ),
     ];
     for (bin, args) in candidates {
         if Command::new(bin)

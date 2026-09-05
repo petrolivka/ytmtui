@@ -155,9 +155,39 @@ crates/ytm-player  stream resolution, ffmpeg decode, PCM tap, queue engine
 crates/ytm-tui     ratatui views, spectrum widget, theming, keymap
 ```
 
+## Installing
+
+```bash
+cargo binstall ytmtui          # prebuilt binary
+cargo install --path .         # from source
+```
+
+Packaging recipes for Arch and Homebrew are in
+[`contrib/packaging/`](contrib/packaging). Both declare `ffmpeg` and `yt-dlp`
+as runtime dependencies, because the app cannot decode or resolve a stream
+without them.
+
+## Contributing
+
+```bash
+cargo test --workspace     # 53 tests; the parser suites need no network
+cargo clippy --workspace --all-targets
+cargo run --bin dump-fixtures    # refresh the captured InnerTube responses
+cargo run --bin probe            # read-only check of every API surface
+```
+
+The parser tests run against committed fixtures rather than the live API, so a
+failure means our code broke — not that YouTube changed overnight. Fuzz targets
+are in [`fuzz/`](fuzz) and need nightly.
+
+## Licence
+
+GPL-3.0-or-later. Note that nothing in the dependency tree is copyleft, so this
+is a free choice rather than a constraint.
+
 ## Documentation
 
 - [Analysis & requirements](docs/ANALYSIS-AND-REQUIREMENTS.md)
 - [Technology risk analysis](docs/TECH-STACK-RISK-ANALYSIS.md) — why Rust, and why ffmpeg + yt-dlp
 - [M0 spike findings](docs/M0-FINDINGS.md)
-- [M1 status](docs/M1-STATUS.md)
+- [M1 status](docs/M1-STATUS.md) · [M2](docs/M2-STATUS.md) · [M3](docs/M3-STATUS.md) · [M4](docs/M4-STATUS.md) · [M5](docs/M5-STATUS.md)

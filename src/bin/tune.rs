@@ -14,8 +14,13 @@ use ytm_player::{ResolverCache, YtDlpResolver};
 use ytm_viz::{Analyser, FFT_SIZE};
 
 fn main() -> Result<()> {
-    let arg = std::env::args().nth(1).unwrap_or_else(|| "dQw4w9WgXcQ".into());
-    let seconds: usize = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(25);
+    let arg = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "dQw4w9WgXcQ".into());
+    let seconds: usize = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(25);
 
     let input = if std::path::Path::new(&arg).exists() {
         arg.clone()
@@ -23,7 +28,10 @@ fn main() -> Result<()> {
         let id = VideoId(extract_id(&arg));
         let r = ResolverCache::new(Arc::new(YtDlpResolver::default()));
         let f = r.resolve(&id)?;
-        println!("source: {} itag {} {} {:.0}k", id, f.itag, f.codec, f.abr_kbps);
+        println!(
+            "source: {} itag {} {} {:.0}k",
+            id, f.itag, f.codec, f.abr_kbps
+        );
         f.url
     };
 
@@ -68,7 +76,13 @@ fn main() -> Result<()> {
     }
 
     all.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let pct = |p: f32| if all.is_empty() { 0.0 } else { all[((all.len() - 1) as f32 * p) as usize] };
+    let pct = |p: f32| {
+        if all.is_empty() {
+            0.0
+        } else {
+            all[((all.len() - 1) as f32 * p) as usize]
+        }
+    };
 
     println!("frames analysed : {frames}");
     println!("--- band value distribution (want a spread, not a pile at 1.0) ---");
@@ -82,7 +96,13 @@ fn main() -> Result<()> {
     for k in 0..16 {
         let m: f64 =
             per_band[k * g..(k + 1) * g].iter().sum::<f64>() / (g as f64 * frames.max(1) as f64);
-        println!("  {:>3}-{:>3}: {:.3} {}", k * g, (k + 1) * g - 1, m, "#".repeat((m * 40.0) as usize));
+        println!(
+            "  {:>3}-{:>3}: {:.3} {}",
+            k * g,
+            (k + 1) * g - 1,
+            m,
+            "#".repeat((m * 40.0) as usize)
+        );
     }
     Ok(())
 }

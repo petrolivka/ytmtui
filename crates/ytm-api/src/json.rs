@@ -84,7 +84,11 @@ pub fn find_duration(v: &Value) -> Option<u64> {
             }
             if let Some(runs) = m.get("runs").and_then(|x| x.as_array()) {
                 for r in runs {
-                    if let Some(d) = r.get("text").and_then(|t| t.as_str()).and_then(parse_duration) {
+                    if let Some(d) = r
+                        .get("text")
+                        .and_then(|t| t.as_str())
+                        .and_then(parse_duration)
+                    {
                         return Some(d);
                     }
                 }
@@ -158,7 +162,16 @@ mod tests {
 
     #[test]
     fn rejects_things_that_merely_contain_a_colon() {
-        for s in ["", "Aphex Twin", "1:1 mix", "Vol: 2", "12:3", "a:bc", "0:00", "99:99:99:99"] {
+        for s in [
+            "",
+            "Aphex Twin",
+            "1:1 mix",
+            "Vol: 2",
+            "12:3",
+            "a:bc",
+            "0:00",
+            "99:99:99:99",
+        ] {
             assert_eq!(parse_duration(s), None, "should reject {s:?}");
         }
     }

@@ -7,7 +7,9 @@
 
 use serde_json::Value;
 use std::time::Duration;
-use ytm_core::{AlbumRef, ArtistRef, BrowseId, PlaylistId, PlaylistRef, Rating, Row, Track, VideoId};
+use ytm_core::{
+    AlbumRef, ArtistRef, BrowseId, PlaylistId, PlaylistRef, Rating, Row, Track, VideoId,
+};
 
 use crate::json;
 
@@ -140,7 +142,11 @@ fn shelf_title(shelf: &Value) -> Option<String> {
 }
 
 fn shelf_items<'a>(kind: &str, shelf: &'a Value) -> Vec<&'a Value> {
-    let key = if kind == "gridRenderer" { "items" } else { "contents" };
+    let key = if kind == "gridRenderer" {
+        "items"
+    } else {
+        "contents"
+    };
     let mut out = Vec::new();
     if let Some(list) = shelf.get(key).and_then(|c| c.as_array()) {
         for entry in list {
@@ -183,9 +189,18 @@ pub fn item_row(item: &Value) -> Option<Row> {
     match page_type(nav) {
         PageType::Album => {
             let (artist, year) = split_album_subtitle(&subtitle);
-            Some(Row::Album(AlbumRef { id, title, artist, year }))
+            Some(Row::Album(AlbumRef {
+                id,
+                title,
+                artist,
+                year,
+            }))
         }
-        PageType::Artist => Some(Row::Artist(ArtistRef { id, name: title, subtitle })),
+        PageType::Artist => Some(Row::Artist(ArtistRef {
+            id,
+            name: title,
+            subtitle,
+        })),
         PageType::Playlist => Some(Row::Playlist(PlaylistRef {
             playlist_id: id.0.strip_prefix("VL").map(|p| PlaylistId(p.to_string())),
             id,
@@ -202,14 +217,21 @@ pub fn item_row(item: &Value) -> Option<Row> {
 fn split_album_subtitle(s: &str) -> (String, Option<String>) {
     let is_year = |x: &str| x.len() == 4 && x.chars().all(|c| c.is_ascii_digit());
     let is_kind = |x: &str| {
-        matches!(x, "Album" | "Single" | "EP" | "Playlist" | "Artist" | "Song" | "Video")
+        matches!(
+            x,
+            "Album" | "Single" | "EP" | "Playlist" | "Artist" | "Song" | "Video"
+        )
     };
     let parts: Vec<&str> = s
         .split('\u{2022}')
         .map(|p| p.trim())
         .filter(|p| !p.is_empty())
         .collect();
-    let year = parts.iter().rev().find(|p| is_year(p)).map(|p| p.to_string());
+    let year = parts
+        .iter()
+        .rev()
+        .find(|p| is_year(p))
+        .map(|p| p.to_string());
     let artist = parts
         .iter()
         .find(|p| !is_kind(p) && !is_year(p))
@@ -218,23 +240,7 @@ fn split_album_subtitle(s: &str) -> (String, Option<String>) {
     (artist, year)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::split_album_subtitle;
-
-    #[test]
-    fn album_subtitles() {
-        assert_eq!(
-            split_album_subtitle("Album \u{2022} Aphex Twin \u{2022} 1992"),
-            ("Aphex Twin".into(), Some("1992".into()))
-        );
-        // Artist pages omit the artist; the year must not land in its place.
-        assert_eq!(split_album_subtitle("2001"), (String::new(), Some("2001".into())));
-        assert_eq!(split_album_subtitle("Single \u{2022} 2024"), (String::new(), Some("2024".into())));
-    }
-}
-
-fn flex_col<'a>(item: &'a Value, i: usize) -> Option<&'a Value> {
+fn flex_col(item: &Value, i: usize) -> Option<&Value> {
     item.get("flexColumns")?
         .as_array()?
         .get(i)?
@@ -306,7 +312,8 @@ pub fn track_from(item: &Value) -> Option<Track> {
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
     let album = if parts.len() >= 3 {
-        Some(parts[parts.len() - 2].trim().to_string()).filter(|a| json::parse_duration(a).is_none())
+        Some(parts[parts.len() - 2].trim().to_string())
+            .filter(|a| json::parse_duration(a).is_none())
     } else {
         None
     };
@@ -361,7 +368,10 @@ fn library_tokens(item: &Value) -> (Option<String>, Option<String>, bool) {
     let mut toggles = Vec::new();
     json::find_all(item, "toggleMenuServiceItemRenderer", &mut toggles);
     for t in toggles {
-        let default_label = t.get("defaultText").and_then(json::text).unwrap_or_default();
+        let default_label = t
+            .get("defaultText")
+            .and_then(json::text)
+            .unwrap_or_default();
         let add = t
             .get("defaultServiceEndpoint")
             .and_then(|e| json::find(e, "feedbackToken"))
@@ -401,10 +411,18 @@ fn dedupe(rows: Vec<Row>) -> Vec<Row> {
     for r in rows {
         let dup = match &r {
             Row::Header(h) => out.iter().any(|x| matches!(x, Row::Header(y) if y == h)),
-            Row::Track(t) => out.iter().any(|x| matches!(x, Row::Track(y) if y.id == t.id)),
-            Row::Album(a) => out.iter().any(|x| matches!(x, Row::Album(y) if y.id == a.id)),
-            Row::Artist(a) => out.iter().any(|x| matches!(x, Row::Artist(y) if y.id == a.id)),
-            Row::Playlist(p) => out.iter().any(|x| matches!(x, Row::Playlist(y) if y.id == p.id)),
+            Row::Track(t) => out
+                .iter()
+                .any(|x| matches!(x, Row::Track(y) if y.id == t.id)),
+            Row::Album(a) => out
+                .iter()
+                .any(|x| matches!(x, Row::Album(y) if y.id == a.id)),
+            Row::Artist(a) => out
+                .iter()
+                .any(|x| matches!(x, Row::Artist(y) if y.id == a.id)),
+            Row::Playlist(p) => out
+                .iter()
+                .any(|x| matches!(x, Row::Playlist(y) if y.id == p.id)),
         };
         if !dup {
             out.push(r);
@@ -414,4 +432,26 @@ fn dedupe(rows: Vec<Row>) -> Vec<Row> {
         out.pop();
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_album_subtitle;
+
+    #[test]
+    fn album_subtitles() {
+        assert_eq!(
+            split_album_subtitle("Album \u{2022} Aphex Twin \u{2022} 1992"),
+            ("Aphex Twin".into(), Some("1992".into()))
+        );
+        // Artist pages omit the artist; the year must not land in its place.
+        assert_eq!(
+            split_album_subtitle("2001"),
+            (String::new(), Some("2001".into()))
+        );
+        assert_eq!(
+            split_album_subtitle("Single \u{2022} 2024"),
+            (String::new(), Some("2024".into()))
+        );
+    }
 }

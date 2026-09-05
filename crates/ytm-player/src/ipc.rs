@@ -25,14 +25,16 @@ pub fn serve(handle: PlayerHandle) -> Result<()> {
         let _ = std::fs::remove_file(&path);
     }
     let listener = UnixListener::bind(&path)?;
-    std::thread::Builder::new().name("ytm-ipc".into()).spawn(move || {
-        for stream in listener.incoming().flatten() {
-            let h = handle.clone();
-            std::thread::spawn(move || {
-                let _ = handle_client(stream, h);
-            });
-        }
-    })?;
+    std::thread::Builder::new()
+        .name("ytm-ipc".into())
+        .spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let h = handle.clone();
+                std::thread::spawn(move || {
+                    let _ = handle_client(stream, h);
+                });
+            }
+        })?;
     Ok(())
 }
 
@@ -120,7 +122,9 @@ fn status_json(handle: &PlayerHandle) -> String {
     let s = handle.status();
     let esc = |v: &str| {
         // Enough for JSON string bodies; track titles really do contain quotes.
-        v.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', " ")
+        v.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', " ")
     };
     let (title, artist, album, id, duration) = match &s.current {
         Some(t) => (
@@ -130,7 +134,13 @@ fn status_json(handle: &PlayerHandle) -> String {
             t.id.0.clone(),
             t.duration.map(|d| d.as_secs()).unwrap_or(0),
         ),
-        None => (String::new(), String::new(), String::new(), String::new(), 0),
+        None => (
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            0,
+        ),
     };
     format!(
         concat!(

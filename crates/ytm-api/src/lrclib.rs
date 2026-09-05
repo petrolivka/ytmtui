@@ -40,7 +40,10 @@ pub fn parse_lrc(body: &str) -> Vec<Line> {
         }
         let text = rest.trim();
         for at in stamps {
-            out.push(Line { at, text: text.to_string() });
+            out.push(Line {
+                at,
+                text: text.to_string(),
+            });
         }
     }
     out.sort_by_key(|l| l.at);
@@ -63,7 +66,9 @@ fn parse_stamp(tag: &str) -> Option<Duration> {
         2 => frac_val * 10,
         _ => frac_val,
     };
-    Some(Duration::from_millis(minutes * 60_000 + seconds * 1000 + millis))
+    Some(Duration::from_millis(
+        minutes * 60_000 + seconds * 1000 + millis,
+    ))
 }
 
 /// Look up synced lyrics. Returns None when there is no match.
@@ -77,10 +82,9 @@ pub fn fetch(
     if artist.trim().is_empty() || title.trim().is_empty() {
         return Ok(None);
     }
-    let mut req = http.get(ENDPOINT).query(&[
-        ("artist_name", artist),
-        ("track_name", title),
-    ]);
+    let mut req = http
+        .get(ENDPOINT)
+        .query(&[("artist_name", artist), ("track_name", title)]);
     if let Some(a) = album {
         req = req.query(&[("album_name", a)]);
     }

@@ -51,7 +51,7 @@ pub fn encode(img: &RgbImage) -> String {
         if *u {
             let (r, g, b) = palette_rgb(i as u8);
             // Sixel colour components are percentages, not 0-255.
-            let pc = |v: u8| (v as u32 * 100 / 255) as u32;
+            let pc = |v: u8| v as u32 * 100 / 255;
             let _ = write!(out, "#{};2;{};{};{}", i, pc(r), pc(g), pc(b));
         }
     }

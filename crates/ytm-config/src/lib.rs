@@ -17,6 +17,7 @@ pub use keys::{Chord, Key, Mods};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[derive(Default)]
 pub struct Config {
     pub general: General,
     pub audio: Audio,
@@ -124,7 +125,10 @@ pub struct Art {
 
 impl Default for Art {
     fn default() -> Self {
-        Self { enabled: true, backend: "auto".into() }
+        Self {
+            enabled: true,
+            backend: "auto".into(),
+        }
     }
 }
 
@@ -170,7 +174,12 @@ impl Default for Audio {
 
 impl Default for Visualizer {
     fn default() -> Self {
-        Self { enabled: true, style: "mirrored".into(), max_fps: 60, bar_step: 2 }
+        Self {
+            enabled: true,
+            style: "mirrored".into(),
+            max_fps: 60,
+            bar_step: 2,
+        }
     }
 }
 
@@ -187,20 +196,6 @@ impl Default for Theme {
             ok: "#4ad295".into(),
             peak: "#9a9ab0".into(),
             spectrum: vec!["#1db954".into(), "#e8c020".into(), "#ff333a".into()],
-        }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            general: General::default(),
-            audio: Audio::default(),
-            visualizer: Visualizer::default(),
-            art: Art::default(),
-            scrobble: Scrobble::default(),
-            theme: Theme::default(),
-            keys: HashMap::new(),
         }
     }
 }
@@ -337,7 +332,12 @@ pub fn load() -> Loaded {
         }
     }
 
-    Loaded { config, keymap, warnings, path }
+    Loaded {
+        config,
+        keymap,
+        warnings,
+        path,
+    }
 }
 
 /// Write a fully-commented default config, for `ytmtui --write-config`.
