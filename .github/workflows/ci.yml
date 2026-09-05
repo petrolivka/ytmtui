@@ -67,7 +67,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run the parser suites with networking disabled
         run: |
-          # Build first: fetching crates does need the network.
-          cargo build --tests -p ytm-api
-          # -rn gives an unprivileged user namespace with no network at all.
-          unshare -rn -- cargo test -p ytm-api --test fixtures --test robustness
+          # Compile first; fetching crates genuinely does need the network.
+          # Then run the built binaries directly, so cargo itself never has to
+          # work inside the namespace.
+          cargo test -p ytm-api --test fixtures --test robustness --no-run
+          bins=$(cargo test -p ytm-api --test fixtures --test robustness --no-run \
+                   --message-format=json \
+                 | jq -r 'select(.profile.test == true) | .executable | select(. != null)')
+          test -n "$bins" || { echo "no test binaries found"; exit 1; }
+          for b in $bins; do
+            echo "::group::$(basename "$b") with no network"
+            # sudo, not `unshare -r`: GitHub runners forbid unprivileged user
+            # namespaces (uid_map is not writable), so the namespace has to be
+            # created with real privileges.
+            sudo unshare -n "$b"
+            echo "::endgroup::"
+          done
