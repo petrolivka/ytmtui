@@ -191,11 +191,28 @@ impl ArtCache {
         self.images.lock().ok()?.get(url).cloned().flatten()
     }
 
+    /// Should a fetch be skipped for this URL right now? True when it is
+    /// already loaded, or failed recently enough not to retry yet.
     pub fn has(&self, url: &str) -> bool {
-        self.images
+        let loaded = self
+            .images
             .lock()
-            .map(|m| m.contains_key(url))
+            .map(|m| matches!(m.get(url), Some(Some(_))))
+            .unwrap_or(false);
+        if loaded {
+            return true;
+        }
+        self.failed_at
+            .lock()
+            .map(|f| f.get(url).is_some_and(|t| t.elapsed() < RETRY_AFTER))
             .unwrap_or(false)
+    }
+
+    /// Record a failure without a network round trip, for tests.
+    #[cfg(test)]
+    fn mark_failed(&self, url: &str, at: Instant) {
+        self.images.lock().unwrap().insert(url.to_string(), None);
+        self.failed_at.lock().unwrap().insert(url.to_string(), at);
     }
 
     /// Fetch and decode, remembering failures too so a broken URL is not
@@ -251,6 +268,22 @@ pub fn at_size(url: &str, px: u32) -> String {
 mod tests {
     use super::*;
     use image::Rgb;
+
+    /// A transient network error must not blank a track's cover for the rest
+    /// of the session, which is what caching the failure forever did.
+    #[test]
+    fn failed_fetches_are_retried_after_a_while() {
+        let c = ArtCache::new().unwrap();
+        let url = "https://example.invalid/cover.jpg";
+        assert!(!c.has(url), "an unknown URL should not be skipped");
+
+        c.mark_failed(url, Instant::now());
+        assert!(c.has(url), "a fresh failure should be left alone");
+        assert!(c.get(url).is_none());
+
+        c.mark_failed(url, Instant::now() - RETRY_AFTER - Duration::from_secs(1));
+        assert!(!c.has(url), "an old failure should be retried");
+    }
 
     #[test]
     fn half_blocks_have_the_right_shape() {

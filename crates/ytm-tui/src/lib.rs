@@ -30,7 +30,7 @@ fn draw_graphics_cover(app: &App) -> Result<()> {
     // Every path that declines to draw must also forget what was painted:
     // whatever replaced the image - the fullscreen spectrum, a dialogue - has
     // erased it, so it has to be sent again when we come back.
-    let mut forget = || *app.hit.painted.borrow_mut() = None;
+    let forget = || *app.hit.painted.borrow_mut() = None;
 
     if !app.show_art || !cover::is_graphics(app.art_backend) {
         return Ok(());
