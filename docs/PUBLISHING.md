@@ -6,12 +6,18 @@ here is a code change; it is all things only the owner can settle.
 The repository is `https://github.com/petrolivka/ytmtui`, already set as
 `origin`, and every URL in the tree points at it.
 
+## Done
+
+- Repository URL: `github.com/petrolivka/ytmtui`, set as `origin`, referenced
+  everywhere in the tree.
+- Private vulnerability reporting is enabled, so the advisory link in
+  `SECURITY.md` and the issue template resolves.
+
 ## Must do
 
 | | Where | Why |
 |---|---|---|
 | **Confirm the maintainer email** | `contrib/packaging/PKGBUILD` | It is the git author address, so it is already in the history — but a package file publishes it more prominently, and that invites spam. Substitute an alias if you would rather. |
-| **Enable private vulnerability reporting** | GitHub → Settings → Security | `SECURITY.md` and the issue-template link both point at a security advisory form that must be switched on. |
 
 ## Decide deliberately
 
