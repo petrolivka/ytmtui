@@ -1,0 +1,14 @@
+# Paste into the [theme] section of config.toml.
+# Deliberately colour-free: the spectrum reads by glyph height alone, which is
+# what NFR-8 asks for (no information carried by colour only).
+[theme]
+fg = "#e8e8e8"
+dim = "#8a8a8a"
+accent = "#ffffff"
+border = "#4a4a4a"
+border_focus = "#e8e8e8"
+selection_bg = "#303030"
+error = "#e8e8e8"
+ok = "#e8e8e8"
+peak = "#9a9a9a"
+spectrum = ["#6a6a6a", "#b0b0b0", "#ffffff"]

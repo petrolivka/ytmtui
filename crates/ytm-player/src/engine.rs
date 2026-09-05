@@ -16,6 +16,25 @@ use ytm_core::{PlayState, PlayerStatus, RepeatMode, Track};
 use crate::pcm::{self, FfmpegPcm, Progress, Tap, TapSink};
 use crate::resolver::ResolverCache;
 
+/// Open a named output device, or the default. A configured device that has
+/// been unplugged falls back rather than refusing to start.
+fn open_device(name: &str) -> Result<rodio::MixerDeviceSink> {
+    if name.is_empty() || name == "default" {
+        return Ok(DeviceSinkBuilder::open_default_sink()?);
+    }
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    let host = rodio::cpal::default_host();
+    if let Ok(mut devices) = host.output_devices() {
+        if let Some(d) = devices.find(|d| d.name().map(|n| n == name).unwrap_or(false)) {
+            if let Ok(sink) = DeviceSinkBuilder::from_device(d).and_then(|b| b.open_stream()) {
+                return Ok(sink);
+            }
+        }
+    }
+    tracing::warn!("audio device '{name}' not available; using the default");
+    Ok(DeviceSinkBuilder::open_default_sink()?)
+}
+
 #[derive(Debug, Clone)]
 pub enum Command {
     /// Replace the queue and start at `index`.
@@ -57,6 +76,14 @@ impl PlayerHandle {
 
 /// Spawn the engine on its own thread. Returns the handle and the analyser tap.
 pub fn spawn(resolver: Arc<ResolverCache>) -> Result<(PlayerHandle, Tap)> {
+    spawn_on_device(resolver, "default")
+}
+
+/// Spawn the engine on a named output device, falling back to the default when
+/// the named one is gone - a device disappearing should not stop playback from
+/// starting (FR-P9).
+pub fn spawn_on_device(resolver: Arc<ResolverCache>, device: &str) -> Result<(PlayerHandle, Tap)> {
+    let device = device.to_string();
     let (tx, rx) = mpsc::channel();
     let status = Arc::new(ArcSwap::from_pointee(PlayerStatus {
         volume: 1.0,
@@ -71,7 +98,7 @@ pub fn spawn(resolver: Arc<ResolverCache>) -> Result<(PlayerHandle, Tap)> {
     std::thread::Builder::new()
         .name("ytm-player".into())
         .spawn(move || {
-            match Engine::new(resolver, sink, errors, status.clone()) {
+            match Engine::new(resolver, sink, errors, status.clone(), &device) {
                 Ok(mut e) => e.run(rx),
                 Err(err) => {
                     status.store(Arc::new(PlayerStatus {
@@ -116,8 +143,9 @@ impl Engine {
         sink: TapSink,
         errors: Arc<Mutex<Vec<String>>>,
         status: Arc<ArcSwap<PlayerStatus>>,
+        device_name: &str,
     ) -> Result<Self> {
-        let device = DeviceSinkBuilder::open_default_sink()?;
+        let device = open_device(device_name)?;
         let player = Player::connect_new(device.mixer());
         Ok(Self {
             _device: device,

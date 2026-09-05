@@ -22,12 +22,14 @@ pub trait MusicBackend: Send + Sync {
     fn continue_rows(&self, token: &str) -> Result<RowPage>;
     /// Lyrics for a track, or None when YouTube Music has none.
     fn lyrics(&self, id: &VideoId) -> Result<Option<String>>;
+    fn search_suggestions(&self, input: &str) -> Result<Vec<String>>;
     fn create_playlist(&self, title: &str, description: &str) -> Result<PlaylistId>;
     fn delete_playlist(&self, id: &PlaylistId) -> Result<()>;
     fn rename_playlist(&self, id: &PlaylistId, title: &str) -> Result<()>;
     fn playlist_add(&self, id: &PlaylistId, video: &VideoId) -> Result<()>;
     fn playlist_remove(&self, id: &PlaylistId, video: &VideoId, set_video_id: &str) -> Result<()>;
     fn set_subscribed(&self, channel: &BrowseId, subscribed: bool) -> Result<()>;
+    fn is_subscribed(&self, channel: &BrowseId) -> Result<bool>;
     fn artist(&self, id: &BrowseId) -> Result<RowPage>;
     fn album(&self, id: &BrowseId) -> Result<RowPage>;
     fn playlist(&self, id: &BrowseId) -> Result<RowPage>;
@@ -64,6 +66,9 @@ impl MusicBackend for Innertube {
     fn lyrics(&self, id: &VideoId) -> Result<Option<String>> {
         Innertube::lyrics(self, id)
     }
+    fn search_suggestions(&self, input: &str) -> Result<Vec<String>> {
+        Innertube::search_suggestions(self, input)
+    }
     fn create_playlist(&self, title: &str, description: &str) -> Result<PlaylistId> {
         Innertube::create_playlist(self, title, description)
     }
@@ -81,6 +86,9 @@ impl MusicBackend for Innertube {
     }
     fn set_subscribed(&self, channel: &BrowseId, subscribed: bool) -> Result<()> {
         Innertube::set_subscribed(self, channel, subscribed)
+    }
+    fn is_subscribed(&self, channel: &BrowseId) -> Result<bool> {
+        Innertube::is_subscribed(self, channel)
     }
     fn artist(&self, id: &BrowseId) -> Result<RowPage> {
         Innertube::artist(self, id)

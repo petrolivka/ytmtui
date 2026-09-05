@@ -6,7 +6,9 @@
 
 use anyhow::Result;
 use arc_swap::ArcSwap;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -57,12 +59,34 @@ pub enum AppEvent {
     TrackState(VideoId, TrackState),
     Lyrics(VideoId, Result<Option<String>, String>),
     Playlists(Result<Vec<PlaylistRef>, String>),
+    Suggestions(String, Vec<String>),
     /// A write finished; refresh whatever view is showing.
     Wrote(String, bool),
     Toast(String),
 }
 
+/// Where the panes ended up on the last frame, so a click can be mapped back
+/// to what is under it. Filled in by the renderer.
+#[derive(Default)]
+pub struct Hitboxes {
+    pub sidebar: Cell<Rect>,
+    pub content: Cell<Rect>,
+    pub queue: Cell<Rect>,
+    pub progress: Cell<Rect>,
+}
+
+/// List scroll offsets, owned here rather than rebuilt per frame, so a click
+/// can be mapped to the row actually under the pointer. Estimating the offset
+/// instead picks the wrong row as soon as a list is scrolled.
+#[derive(Default)]
+pub struct ListStates {
+    pub content: RefCell<ratatui::widgets::ListState>,
+    pub queue: RefCell<ratatui::widgets::ListState>,
+}
+
 pub struct App {
+    pub hit: Hitboxes,
+    pub lists: ListStates,
     pub backend: Arc<dyn MusicBackend>,
     pub player: PlayerHandle,
     pub theme: Theme,
@@ -84,6 +108,13 @@ pub struct App {
     pub show_lyrics: bool,
     pub modal: Option<Modal>,
     pub search_history: Vec<String>,
+    pub suggestions: Vec<String>,
+    /// When the query last changed, for debouncing (FR-S2).
+    suggest_after: Option<Instant>,
+    suggest_for: String,
+    /// Last-seen config mtime, for hot-reload (FR-C1).
+    config_mtime: Option<std::time::SystemTime>,
+    config_checked: Instant,
     history_pos: Option<usize>,
     /// Lyrics for the track they belong to, so a stale fetch is never shown
     /// against the wrong song.
@@ -131,6 +162,8 @@ impl App {
             _ => VizStyle::Mirrored,
         };
         let mut app = Self {
+            hit: Hitboxes::default(),
+            lists: ListStates::default(),
             backend,
             player,
             theme: Theme::from_config(&cfg),
@@ -148,6 +181,11 @@ impl App {
             show_lyrics: false,
             modal: None,
             search_history: crate::session::load_search_history(),
+            suggestions: Vec::new(),
+            suggest_after: None,
+            suggest_for: String::new(),
+            config_mtime: config_mtime(),
+            config_checked: Instant::now(),
             history_pos: None,
             lyrics: None,
             lyrics_scroll: 0,
@@ -430,9 +468,17 @@ impl App {
                         self.reload_current();
                     }
                 }
+                AppEvent::Suggestions(q, list) => {
+                    // Discard anything that arrived for an older query.
+                    if q == self.query.trim() {
+                        self.suggestions = list;
+                    }
+                }
                 AppEvent::Toast(m) => self.toast(m),
             }
         }
+        self.poll_config();
+        self.poll_suggestions();
         self.maybe_autoplay();
         self.refresh_track_state();
         self.maybe_load_more();
@@ -697,13 +743,25 @@ impl App {
         // a query would trigger bindings.
         if self.mode == Mode::Search {
             match k.code {
-                KeyCode::Esc => self.mode = Mode::Normal,
+                KeyCode::Esc => {
+                    self.mode = Mode::Normal;
+                    self.suggestions.clear();
+                }
+                // Accept the first suggestion rather than the raw text.
+                KeyCode::Tab => {
+                    if let Some(first) = self.suggestions.first().cloned() {
+                        self.query = first;
+                        self.suggestions.clear();
+                    }
+                }
                 KeyCode::Enter => {
                     self.mode = Mode::Normal;
+                    self.suggestions.clear();
                     self.run_search(SearchFilter::Songs);
                 }
                 KeyCode::Backspace => {
                     self.query.pop();
+                    self.schedule_suggestions();
                 }
                 // Recall previous searches (FR-S3).
                 KeyCode::Up => self.recall_search(1),
@@ -711,6 +769,7 @@ impl App {
                 KeyCode::Char(c) => {
                     self.query.push(c);
                     self.history_pos = None;
+                    self.schedule_suggestions();
                 }
                 _ => {}
             }
@@ -723,6 +782,60 @@ impl App {
         let Some(chord) = chord_of(k) else { return };
         let Some(action) = self.keymap.get(&chord).copied() else { return };
         self.do_action(action);
+    }
+
+    /// Pick up edits to config.toml without a restart. Polling the mtime a few
+    /// times a minute avoids a file-watcher dependency for something this small.
+    fn poll_config(&mut self) {
+        if self.config_checked.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        self.config_checked = Instant::now();
+        let now = config_mtime();
+        if now == self.config_mtime {
+            return;
+        }
+        self.config_mtime = now;
+        let loaded = ytm_config::load();
+        self.theme = Theme::from_config(&loaded.config);
+        self.keymap = loaded.keymap;
+        self.autoplay = loaded.config.general.autoplay;
+        self.config = loaded.config;
+        if let Some(w) = loaded.warnings.first() {
+            self.toast(format!("config reloaded with problems: {w}"));
+        } else {
+            self.toast("config reloaded".into());
+        }
+    }
+
+    /// Debounce: only ask after typing pauses, so a fast typist makes one
+    /// request rather than one per keystroke (FR-S2, and FR-N2).
+    fn schedule_suggestions(&mut self) {
+        self.suggest_after = Some(Instant::now() + Duration::from_millis(250));
+    }
+
+    fn poll_suggestions(&mut self) {
+        let Some(at) = self.suggest_after else { return };
+        if Instant::now() < at {
+            return;
+        }
+        self.suggest_after = None;
+        let q = self.query.trim().to_string();
+        if q.is_empty() {
+            self.suggestions.clear();
+            return;
+        }
+        if q == self.suggest_for {
+            return;
+        }
+        self.suggest_for = q.clone();
+        let b = self.backend.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            if let Ok(s) = b.search_suggestions(&q) {
+                let _ = tx.send(AppEvent::Suggestions(q, s));
+            }
+        });
     }
 
     fn recall_search(&mut self, delta: isize) {
@@ -978,11 +1091,15 @@ impl App {
         let b = self.backend.clone();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            // There is no read for the current state here, so this subscribes;
-            // running it again from the library unsubscribes.
-            let msg = match b.set_subscribed(&id, true) {
-                Ok(()) => format!("subscribed to {name}"),
-                Err(e) => format!("subscribe failed: {e}"),
+            // Read the current state first: a "toggle" that cannot read it can
+            // only ever subscribe.
+            let msg = match b.is_subscribed(&id) {
+                Ok(now) => match b.set_subscribed(&id, !now) {
+                    Ok(()) if now => format!("unsubscribed from {name}"),
+                    Ok(()) => format!("subscribed to {name}"),
+                    Err(e) => format!("subscribe failed: {e}"),
+                },
+                Err(e) => format!("could not read subscription state: {e}"),
             };
             let _ = tx.send(AppEvent::Wrote(msg, true));
         });
@@ -1159,14 +1276,90 @@ impl App {
 
     pub fn poll_input(&mut self, timeout: Duration) -> Result<bool> {
         if event::poll(timeout)? {
-            if let Event::Key(k) = event::read()? {
-                if k.is_press() {
-                    self.handle_key(k);
-                }
+            match event::read()? {
+                Event::Key(k) if k.is_press() => self.handle_key(k),
+                Event::Mouse(m) => self.handle_mouse(m),
+                _ => {}
             }
             return Ok(true);
         }
         Ok(false)
+    }
+
+    fn handle_mouse(&mut self, m: MouseEvent) {
+        // Overlays own the pointer too, and there is nothing useful to click.
+        if self.modal.is_some() || self.show_help {
+            return;
+        }
+        let inside = |r: Rect| {
+            m.column >= r.x && m.column < r.x + r.width && m.row >= r.y && m.row < r.y + r.height
+        };
+        let (sidebar, content, queue, progress) = (
+            self.hit.sidebar.get(),
+            self.hit.content.get(),
+            self.hit.queue.get(),
+            self.hit.progress.get(),
+        );
+
+        match m.kind {
+            MouseEventKind::ScrollDown => {
+                let target = if inside(sidebar) {
+                    Focus::Sidebar
+                } else if inside(queue) {
+                    Focus::Queue
+                } else {
+                    Focus::Content
+                };
+                self.focus = target;
+                self.move_sel(3);
+            }
+            MouseEventKind::ScrollUp => {
+                let target = if inside(sidebar) {
+                    Focus::Sidebar
+                } else if inside(queue) {
+                    Focus::Queue
+                } else {
+                    Focus::Content
+                };
+                self.focus = target;
+                self.move_sel(-3);
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if inside(progress) && progress.width > 0 {
+                    self.seek_to_fraction(
+                        (m.column.saturating_sub(progress.x)) as f64 / progress.width as f64,
+                    );
+                } else if inside(sidebar) {
+                    self.focus = Focus::Sidebar;
+                    let i = (m.row - sidebar.y) as usize;
+                    if self.sidebar.get(i).map(|d| d.is_selectable()) == Some(true) {
+                        self.sidebar_sel = i;
+                    }
+                } else if inside(queue) {
+                    self.focus = Focus::Queue;
+                    let idx = self.lists.queue.borrow().offset() + (m.row - queue.y) as usize;
+                    if idx < self.player.status().queue.len() {
+                        self.queue_sel = idx;
+                    }
+                } else if inside(content) {
+                    self.focus = Focus::Content;
+                    let idx = self.lists.content.borrow().offset() + (m.row - content.y) as usize;
+                    if let Some(p) = self.stack.last_mut() {
+                        if p.rows.get(idx).map(|r| r.is_selectable()) == Some(true) {
+                            p.sel = idx;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn seek_to_fraction(&mut self, f: f64) {
+        let st = self.player.status();
+        let Some(total) = st.current.as_ref().and_then(|t| t.duration) else { return };
+        let target = total.as_secs_f64() * f.clamp(0.0, 1.0);
+        self.player.send(PCmd::SeekRelative(target - st.position.as_secs_f64()));
     }
 
     pub fn shutdown(&self) {
@@ -1174,6 +1367,11 @@ impl App {
         self.quit_flag.store(true, Ordering::Relaxed);
         self.player.send(PCmd::Shutdown);
     }
+}
+
+fn config_mtime() -> Option<std::time::SystemTime> {
+    let p = ytm_config::config_path()?;
+    std::fs::metadata(p).ok()?.modified().ok()
 }
 
 /// The analyser thread. Rebuilds itself when the terminal width changes the

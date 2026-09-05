@@ -1,0 +1,12 @@
+# Paste into the [theme] section of config.toml
+[theme]
+fg = "#cdd6f4"
+dim = "#6c7086"
+accent = "#cba6f7"
+border = "#45475a"
+border_focus = "#cba6f7"
+selection_bg = "#313244"
+error = "#f38ba8"
+ok = "#a6e3a1"
+peak = "#9399b2"
+spectrum = ["#94e2d5", "#89b4fa", "#cba6f7", "#f38ba8"]

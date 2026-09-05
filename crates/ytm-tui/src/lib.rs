@@ -34,6 +34,7 @@ pub fn run(
     let mut app = App::new(backend, player, tap, config);
     // `ratatui::init()` panics when there is no controlling terminal; use the
     // fallible form so a headless invocation gets an explanation instead.
+    let mut mouse_on = false;
     let mut terminal = ratatui::try_init().map_err(|e| {
         anyhow!(
             "could not initialise the terminal: {e}\n\
@@ -43,6 +44,17 @@ pub fn run(
         )
     })?;
     let frame_budget = Duration::from_millis(1000 / max_fps);
+
+    // Mouse support is optional: a terminal that refuses it still works fully
+    // from the keyboard.
+    if ratatui::crossterm::execute!(
+        std::io::stdout(),
+        ratatui::crossterm::event::EnableMouseCapture
+    )
+    .is_ok()
+    {
+        mouse_on = true;
+    }
 
     let res = (|| -> Result<()> {
         while !app.should_quit {
@@ -59,6 +71,12 @@ pub fn run(
     })();
 
     app.shutdown();
+    if mouse_on {
+        let _ = ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::DisableMouseCapture
+        );
+    }
     ratatui::restore();
     res
 }

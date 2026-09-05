@@ -429,6 +429,30 @@ impl Innertube {
         Ok(RowPage { title: page_title(&v), rows, continuation: parse::continuation(&v) })
     }
 
+    /// Search-as-you-type suggestions.
+    pub fn search_suggestions(&self, input: &str) -> Result<Vec<String>> {
+        if input.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let v = self.get(
+            "music/get_search_suggestions",
+            json!({ "input": input }),
+            TTL_SEARCH,
+        )?;
+        let mut out = Vec::new();
+        let mut items = Vec::new();
+        json::find_all(&v, "searchSuggestionRenderer", &mut items);
+        for it in items {
+            if let Some(t) = it.get("suggestion").and_then(json::text) {
+                if !t.trim().is_empty() && !out.contains(&t) {
+                    out.push(t);
+                }
+            }
+        }
+        out.truncate(8);
+        Ok(out)
+    }
+
     /// Lyrics for a track, if YouTube Music has any.
     ///
     /// Two hops: the watch-next response carries a Lyrics tab whose browse id
@@ -576,6 +600,16 @@ impl Innertube {
         )?;
         self.invalidate_library();
         Ok(())
+    }
+
+    /// Whether the account is subscribed to an artist. Needed because
+    /// "toggle" without reading the current state can only ever subscribe.
+    pub fn is_subscribed(&self, channel: &BrowseId) -> Result<bool> {
+        let v = self.get("browse", json!({ "browseId": channel.0 }), TTL_LIBRARY)?;
+        Ok(json::find(&v, "subscribeButtonRenderer")
+            .and_then(|b| b.get("subscribed"))
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false))
     }
 
     pub fn set_subscribed(&self, channel: &BrowseId, subscribed: bool) -> Result<()> {

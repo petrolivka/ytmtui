@@ -16,11 +16,11 @@ spectrum where the album art would be.
 ╰───────────────────────────────────────────────────────────────────────────────╯
 ```
 
-**Status: M2 (parity core).** Home, Explore, Charts, the full library, artist /
-album / playlist pages, search across four tabs, queue, radio and autoplay,
-thumbs up/down, the library toggle, and the live spectrum all work — a listening
-session needs no browser. Playlist editing, lyrics, themes and a config file are
-next; see the [roadmap](docs/ANALYSIS-AND-REQUIREMENTS.md#13-roadmap).
+**Status: M3 (polish).** Everything in M2 plus gapless playback, MPRIS (media
+keys and playerctl), lyrics, playlist editing, a command palette, mouse support,
+session restore, search suggestions and history, a config file with themes and
+fully remappable keys, and `--doctor`. See the
+[roadmap](docs/ANALYSIS-AND-REQUIREMENTS.md#13-roadmap) for what is left.
 
 ## ⚠️ Read this before signing in
 
@@ -77,6 +77,28 @@ cp ~/Downloads/music.youtube.com_cookies.txt ~/.config/ytmtui/cookies.txt
 The cookie jar must contain `__Secure-3PAPISID`, which is used to compute the
 `SAPISIDHASH` request signature. Credentials never leave your machine.
 
+## Configuration
+
+```bash
+ytmtui --write-config     # write a commented default to ~/.config/ytmtui/config.toml
+ytmtui --list-actions     # every bindable action name
+ytmtui --doctor           # check ffmpeg, yt-dlp, audio devices, colour, account
+```
+
+The config covers autoplay, audio quality and output device, the visualiser,
+colours and key bindings, and is reloaded when you save it. Every key maps to a
+named action, so rebinding is one line:
+
+```toml
+[keys]
+"ctrl+n" = "next"
+"f1"     = "help"
+```
+
+Ready-made themes are in [`contrib/themes/`](contrib/themes) — paste one into
+the `[theme]` section. A broken entry is reported at startup and skipped rather
+than throwing the whole config away.
+
 ## Keys
 
 | Key | Action | | Key | Action |
@@ -89,7 +111,8 @@ The cookie jar must contain `__Secure-3PAPISID`, which is used to compute the
 | `g` / `G` | go to artist / album | | `9` / `0` | volume down / up |
 | `o` / `e` | play next / queue at end | | `v` / `z` | visualiser style / fullscreen |
 | `x` | remove from queue | | `?` / `q` | help / quit |
-| `Space`, `n`/`p`, `←`/`→` | play/pause, next/prev, seek (Shift: 30s) | | | |
+| `Space`, `n`/`p`, `←`/`→` | play/pause, next/prev, seek (Shift: 30s) | | `L` | lyrics |
+| `:` | command palette | | `P` / `N` | add to playlist / new playlist |
 
 Thumbs up adds to **Liked Songs**; it does *not* add to your library. Those are
 genuinely different operations in YouTube Music, and ytmtui keeps them distinct.

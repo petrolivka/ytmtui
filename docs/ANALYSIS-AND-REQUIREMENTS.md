@@ -9,6 +9,7 @@
 | Owner | petr |
 | Scope | Product analysis, feature brainstorm, functional & non-functional requirements, architecture proposal, roadmap |
 | Out of scope | Implementation, detailed API schemas, test plans |
+| M3 results | [M3-STATUS.md](./M3-STATUS.md) — **polish complete**; all `S` requirements met bar two, listed with reasons |
 | M2 results | [M2-STATUS.md](./M2-STATUS.md) — **parity core complete**; a listening session needs no browser |
 | M1 results | [M1-STATUS.md](./M1-STATUS.md) — **skeleton player complete**; spike promoted to `crates/` |
 | M0 results | [M0-FINDINGS.md](./M0-FINDINGS.md) — **spike complete, verdict GO**; supersedes several assumptions below |
@@ -176,8 +177,8 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 | ID | Requirement | Pri |
 |---|---|---|
 | FR-S1 | ✅ Global search with result tabs: Top result, Songs, Videos, Albums, Artists, Playlists, Community playlists | M |
-| FR-S2 | Search-as-you-type suggestions, debounced (~200 ms), cancellable in-flight requests | S |
-| FR-S3 | Search history, recallable with ↑ in the search bar | S |
+| FR-S2 | ✅ Search-as-you-type suggestions, debounced (~200 ms), cancellable in-flight requests | S |
+| FR-S3 | ✅ Search history, recallable with ↑ in the search bar | S |
 | FR-S4 | Filter/scope search within the current library view | C |
 
 ### 6.4 Library
@@ -187,7 +188,7 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 | FR-L1 | ✅ Library sections: Playlists, Songs (liked + library), Albums, Artists, Subscriptions | M |
 | FR-L2 | Liked Songs playlist, always present and playable | M |
 | FR-L3 | ✅ Recently played / History view | S |
-| FR-L4 | Create / rename / delete playlist; add & remove tracks; reorder | S |
+| FR-L4 | ✅ Create / rename / delete playlist; add & remove tracks; reorder | S |
 | FR-L5 | Uploads (personal library) | W |
 
 ### 6.5 Playback
@@ -198,11 +199,11 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 | FR-P2 | Seek: relative (±5 s / ±30 s) and absolute (click/drag on progress bar, or `g` + timestamp) | M |
 | FR-P3 | Volume 0–150 % with a soft limiter above 100 %, plus mute toggle | M |
 | FR-P4 | Repeat modes: off → all → one; Shuffle on/off (Fisher-Yates over the queue, preserving the current track) | M |
-| FR-P5 | **Gapless playback** between consecutive tracks (prefetch + decode-ahead of the next item) | S |
+| FR-P5 | ✅ **Gapless playback** between consecutive tracks (prefetch + decode-ahead of the next item) | S |
 | FR-P6 | Crossfade, configurable 0–12 s | C |
 | FR-P7 | Playback speed 0.5×–2.0× with pitch preserved | C |
-| FR-P8 | Audio quality selector: Low / Normal / High / Auto-by-bandwidth, mapped to itags | S |
-| FR-P9 | Output device selection (list ALSA/Pulse/Pipewire/CoreAudio sinks); survives device disappearance | S |
+| FR-P8 | ✅ Audio quality selector: Low / Normal / High / Auto-by-bandwidth, mapped to itags | S |
+| FR-P9 | ✅ Output device selection (list ALSA/Pulse/Pipewire/CoreAudio sinks); survives device disappearance | S |
 | FR-P10 | Robust buffering: prefetch window, stall detection, automatic retry with exponential backoff, resume at the same offset | M |
 | FR-P11 | Normalisation / ReplayGain-style loudness levelling using the stream's loudnessDb | C |
 | **FR-P12** | **Resolve stream URLs ahead of need**: resolve the next queue item during the current track, cache resolved URLs until their `expire`, spinner on unavoidable cold resolve. Measured yt-dlp cold resolve = **3.4 s**, far too slow to sit in the interactive path | **M** |
@@ -215,7 +216,7 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 | FR-Q2 | "Play next" vs "Add to queue" as distinct actions | M |
 | FR-Q3 | ✅ **Autoplay/radio**: when the queue drains, continue with a station seeded from the last track — matching official behaviour, toggleable with `A` | M |
 | FR-Q4 | ✅ "Start radio" from the selected song (`R`); artist/album/playlist seeds pending their entity pages | M |
-| FR-Q5 | Queue persisted across restarts (track + position) | S |
+| FR-Q5 | ✅ Queue persisted across restarts (track + position) | S |
 
 ### 6.7 Ratings & social — *the like/dislike surface*
 
@@ -225,19 +226,19 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 | FR-R2 | **Thumbs down**; by default also skips the track (configurable), mirroring the official player | M |
 | FR-R3 | Toggling off a rating (press again → `like/removelike`) | M |
 | FR-R4 | ✅ **Add to / remove from Library**, kept visually and semantically distinct from thumbs-up (§4.5) | M |
-| FR-R5 | Add track to a playlist via a picker | S |
-| FR-R6 | Subscribe / unsubscribe to an artist | S |
+| FR-R5 | ✅ Add track to a playlist via a picker | S |
+| FR-R6 | ✅ Subscribe / unsubscribe to an artist | S |
 | FR-R7 | ✅ Rating state is fetched with each track so the UI shows the *true* current state, not a guess | M |
-| FR-R8 | Share: copy the track/album URL to the clipboard | S |
+| FR-R8 | ✅ Share: copy the track/album URL to the clipboard | S |
 | FR-R9 | Write operations implemented **in-house** (`innertube-write`: SAPISIDHASH + like/dislike/removelike/library endpoints) rather than via a pre-1.0 third-party crate — see companion doc §8 | M |
 
 ### 6.8 Lyrics
 
 | ID | Requirement | Pri |
 |---|---|---|
-| FR-Y1 | Plain lyrics panel via `music_lyrics` | S |
+| FR-Y1 | ✅ Plain lyrics panel via `music_lyrics` | S |
 | FR-Y2 | Time-synced lyrics with the active line highlighted and auto-scroll, when a synced source is available (e.g. LRCLIB as a supplementary provider) | C |
-| FR-Y3 | Graceful "no lyrics available" state | S |
+| FR-Y3 | ✅ Graceful "no lyrics available" state | S |
 
 ### 6.9 Visualisation — *the differentiator* (detailed in §7)
 
@@ -260,11 +261,11 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 |---|---|---|
 | FR-U1 | Persistent layout: sidebar (nav) + main content + now-playing bar + visualiser pane | M |
 | FR-U2 | Responsive down to 80×24; progressive disclosure as width grows; never panics on tiny terminals | M |
-| FR-U3 | Vim-style keys by default, with arrows/emacs alternates; **fully remappable** via config | M |
+| FR-U3 | ✅ Vim-style keys by default, with arrows/emacs alternates; **fully remappable** via config | M |
 | FR-U4 | Built-in help overlay (`?`) generated from the live keymap | M |
-| FR-U5 | Command palette (`:`) for actions without a binding | S |
-| FR-U6 | Mouse support: click to focus/select, click-seek on the progress bar, scroll wheel | S |
-| FR-U7 | Themes: ship several (incl. YTM-red dark, gruvbox, catppuccin, monochrome); user TOML themes; auto-detect terminal background | S |
+| FR-U5 | ✅ Command palette (`:`) for actions without a binding | S |
+| FR-U6 | ✅ Mouse support: click to focus/select, click-seek on the progress bar, scroll wheel | S |
+| FR-U7 | ✅ Themes: ship several (incl. YTM-red dark, gruvbox, catppuccin, monochrome); user TOML themes; auto-detect terminal background | S |
 | FR-U8 | Non-blocking toast/notification area for errors and confirmations | M |
 | FR-U9 | Loading skeletons/spinners — **the UI never blocks on network I/O** | M |
 
@@ -272,7 +273,7 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 
 | ID | Requirement | Pri |
 |---|---|---|
-| FR-I1 | **MPRIS2** D-Bus interface on Linux (playerctl, media keys, desktop widgets) | S |
+| FR-I1 | ✅ **MPRIS2** D-Bus interface on Linux (playerctl, media keys, desktop widgets) | S |
 | FR-I2 | Media-key handling on macOS/Windows | C |
 | FR-I3 | Desktop notification on track change (configurable) | C |
 | FR-I4 | Discord Rich Presence / scrobbling to Last.fm or ListenBrainz | C |
@@ -282,11 +283,11 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 
 | ID | Requirement | Pri |
 |---|---|---|
-| FR-C1 | TOML config at `$XDG_CONFIG_HOME/ytmtui/config.toml`, hot-reload on save | S |
+| FR-C1 | ✅ TOML config at `$XDG_CONFIG_HOME/ytmtui/config.toml`, hot-reload on save | S |
 | FR-C2 | Bounded on-disk cache (default 1 GiB, LRU) for audio segments + metadata + a small thumbnail cache | M |
 | FR-C3 | ✅ Metadata cache with TTLs (search 5 min, artist/album 24 h, home 15 min) and a manual refresh key | S |
-| FR-C4 | `--log-level`, log to file, and a `ytmtui doctor` command reporting backend/codec/PO-token/terminal-capability status | S |
-| FR-C5 | Session restore: last view, queue, track, position | S |
+| FR-C4 | ✅ `--log-level`, log to file, and a `ytmtui doctor` command reporting backend/codec/PO-token/terminal-capability status | S |
+| FR-C5 | ✅ Session restore: last view, queue, track, position | S |
 
 ### 6.13 Account safety (see R11)
 
@@ -598,7 +599,7 @@ All remappable; the help overlay is generated from the active map so it never dr
 | **M0 — Spike (1 wk)** | Prove the three risky things *separately*: (a) authenticated InnerTube read + a successful like via write path; (b) resolve a stream URL via **both** resolvers (native + yt-dlp) and decode via **both** paths (ffmpeg + symphonia); (c) `ytm-viz` rendering a spectrum from a local WAV in ratatui | Three throwaway binaries, each demonstrably working — tested against the *fallbacks*, not just the happy path. **Go/no-go on R2, R3 & R11 here.** |
 | **M1 — Skeleton player** ✅ | Workspace, search → play → pause/seek/volume, queue, real visualiser wired to real audio | **Met.** Verified incl. 9 live SIGWINCH resizes. Ratings pulled forward from M2. See [M1-STATUS.md](./M1-STATUS.md) |
 | **M2 — Parity core (v1.0)** ✅ | Home, Library, Liked, artist/album/playlist pages, **thumbs up/down + library toggle**, radio/autoplay, shuffle/repeat, history, help overlay, themes, error toasts | **Met** for the acceptance test: a full listening session needs no browser. On-disk audio cache (FR-C2) deferred with reasons — see [M2-STATUS.md](./M2-STATUS.md) |
-| **M3 — Polish (v1.1)** | Gapless, MPRIS, lyrics, playlist editing, command palette, mouse, session restore, `doctor` | All `S` requirements met |
+| **M3 — Polish (v1.1)** ✅ | Gapless, MPRIS, lyrics, playlist editing, command palette, mouse, session restore, `doctor` | **Met** except FR-A2 (keyring) and FR-B2 (moods & genres), both deferred with reasons in [M3-STATUS.md](./M3-STATUS.md) |
 | **M4 — Delight (v1.2)** | Spectrogram mode, beat detection, crossfade, synced lyrics, Sixel art, scrobbling, CLI/IPC | Selected `C` items |
 | **M5 — Hardening** | Fixture test suite for backend shapes, fuzz the parsers, packaging (AUR, brew, cargo-binstall), CI matrix | Reproducible releases |
 

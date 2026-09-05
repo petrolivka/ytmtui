@@ -105,6 +105,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     if app.modal.is_some() {
         draw_modal(f, app, area);
     }
+    draw_suggestions(f, app, header);
 }
 
 /// Centred overlay box of the given size.
@@ -297,6 +298,43 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(line).block(block(app, "ytmtui".into(), app.mode == Mode::Search)),
         area,
     );
+
+}
+
+/// Suggestions hang below the search field. Drawn last, because the body panes
+/// are painted after the header and would otherwise overwrite it.
+fn draw_suggestions(f: &mut Frame, app: &App, header: Rect) {
+    if app.mode == Mode::Search && !app.suggestions.is_empty() {
+        let h = (app.suggestions.len() as u16 + 2).min(10);
+        let r = Rect {
+            x: header.x + 2,
+            y: header.y + header.height,
+            width: header.width.saturating_sub(4).min(60),
+            height: h,
+        };
+        f.render_widget(Clear, r);
+        let lines: Vec<Line> = app
+            .suggestions
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                Line::from(Span::styled(
+                    format!("  {s}"),
+                    Style::default().fg(if i == 0 { app.theme.fg } else { app.theme.dim }),
+                ))
+            })
+            .collect();
+        f.render_widget(
+            Paragraph::new(lines).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(app.theme.border))
+                    .title(" suggestions \u{2022} tab to accept "),
+            ),
+            r,
+        );
+    }
 }
 
 fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
@@ -305,6 +343,7 @@ fn draw_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let inner = b.inner(area);
     f.render_widget(b, area);
 
+    app.hit.sidebar.set(inner);
     let items: Vec<ListItem> = app
         .sidebar
         .iter()
@@ -389,6 +428,7 @@ fn draw_content(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect) {
     let inner = b.inner(area);
     f.render_widget(b, area);
 
+    app.hit.content.set(inner);
     if page.rows.is_empty() {
         let msg = if page.loading {
             "loading\u{2026}".to_string()
@@ -409,7 +449,7 @@ fn draw_content(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect) {
         })
         .collect();
 
-    let mut st = ListState::default();
+    let mut st = app.lists.content.borrow_mut();
     st.select(Some(page.sel.min(page.rows.len() - 1)));
     f.render_stateful_widget(
         List::new(items).highlight_style(
@@ -426,6 +466,7 @@ fn draw_queue(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect) {
     let inner = b.inner(area);
     f.render_widget(b, area);
 
+    app.hit.queue.set(inner);
     if status.queue.is_empty() {
         f.render_widget(Paragraph::new("empty").fg(app.theme.dim), inner);
         return;
@@ -437,7 +478,7 @@ fn draw_queue(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect) {
         .map(|(i, t)| row_item(app, &Row::Track(t.clone()), i == status.queue_index, inner.width))
         .collect();
 
-    let mut st = ListState::default();
+    let mut st = app.lists.queue.borrow_mut();
     st.select(Some(app.queue_sel.min(status.queue.len() - 1)));
     f.render_stateful_widget(
         List::new(items).highlight_style(
@@ -543,6 +584,13 @@ fn draw_now_playing(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect)
             Some(t) if t.as_secs_f64() > 0.0 => (pos.as_secs_f64() / t.as_secs_f64()).clamp(0.0, 1.0),
             _ => 0.0,
         };
+        // Remember where the bar is so it can be clicked to seek.
+        app.hit.progress.set(Rect {
+            x: bar.x + left.width() as u16 + 1,
+            y: bar.y,
+            width: track_w as u16,
+            height: 1,
+        });
         let filled = (frac * track_w as f64) as usize;
         let mut track = String::new();
         for i in 0..track_w {

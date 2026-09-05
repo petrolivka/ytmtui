@@ -105,7 +105,8 @@ fn main() -> Result<()> {
     let resolver = Arc::new(ResolverCache::new(Arc::new(YtDlpResolver::new(
         config.config.audio.quality.itags(),
     ))));
-    let (player, tap) = ytm_player::spawn(resolver).context("starting playback engine")?;
+    let (player, tap) = ytm_player::engine::spawn_on_device(resolver, &config.config.audio.device)
+        .context("starting playback engine")?;
 
     // MPRIS is best-effort: no session bus (a bare TTY, a container, SSH
     // without one) simply means no media-key integration, not a failure to
@@ -165,8 +166,18 @@ mod doctor {
 
         println!("\naudio:");
         match rodio::DeviceSinkBuilder::open_default_sink() {
-            Ok(h) => ok("output device", format!("{:?}", h.config())),
-            Err(e) => bad("output device", &format!("{e}")),
+            Ok(h) => ok("default device", format!("{:?}", h.config())),
+            Err(e) => bad("default device", &format!("{e}")),
+        }
+        let devices = ytm_player::output_devices();
+        if devices.is_empty() {
+            bad("devices", "none enumerated");
+        } else {
+            ok("devices", format!("{} available", devices.len()));
+            for d in &devices {
+                println!("      {d}");
+            }
+            println!("      (set one with audio.device in config.toml)");
         }
 
         println!("\nterminal:");
