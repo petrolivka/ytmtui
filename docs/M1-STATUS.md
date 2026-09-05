@@ -86,6 +86,16 @@ codes. `main` now checks `IsTerminal` before opening the audio device, and the
 UI uses `try_init()`, so a headless run exits 1 with a plain explanation. This
 was a straight NFR-5 violation ("no panics reach the user").
 
+**(i) Track durations were missing everywhere except search.** Reported from
+real use: every row in Liked Songs showed `--:--`. Search returns the duration
+in the last run of `flexColumns[1]`, but library and playlist responses put it
+in `fixedColumns`, and the parser only read the former. Without a duration the
+progress bar has no total and never fills, so this was functional rather than
+cosmetic. Duration is now read from `flexColumns`, then `fixedColumns`, then by
+scanning the row; `parse_duration` was tightened to match, since the new
+fallback scan would otherwise turn any colon-bearing text into a bogus
+duration.
+
 **(g) Bars climbed while playback was paused.** Reported from real use. With
 playback paused the tap goes quiet, so `analyse` was called repeatedly against a
 frozen history buffer while the automatic-gain ceiling decayed toward it — every
@@ -135,9 +145,9 @@ the constraint, so it is worth deciding deliberately before M2.
 
 ## 6. Still open
 
-- **R11 / the credentialed test.** `authcheck` is built and ready; it needs your
-  cookies. This remains the last unverified path in the whole project. It is
-  non-destructive: it restores whatever rating state it found.
+- ~~R11 / the credentialed test.~~ **Done 2026-09-05** — authenticated read and
+  the like/unlike write path both confirmed on a real account. Every path in the
+  project is now verified end to end.
 - Home feed, Explore, artist/album/playlist pages (M2).
 - Radio/autoplay when the queue drains — currently playback simply stops.
 - Add-to-library (distinct from thumbs up), playlist editing, lyrics.

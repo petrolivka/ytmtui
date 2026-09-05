@@ -1,6 +1,6 @@
 # M0 Spike — Findings
 
-**Verdict: GO.** Every risk M0 was built to test came back green or better than the requirements doc assumed. One risk is eliminated outright, one is materially lower than estimated, and one new *performance* problem was found that changes an M1 requirement.
+**Verdict: GO — now complete.** Every risk M0 was built to test came back green or better than the requirements doc assumed. The last item, the credentialed write path, was confirmed on 2026-09-05. One risk is eliminated outright, one is materially lower than estimated, and one new *performance* problem was found that changes an M1 requirement.
 
 | | |
 |---|---|
@@ -18,7 +18,7 @@
 | **b1** | Resolve a YouTube Music stream URL | ✅ **GREEN** — works with **no cookies and no PO token** |
 | **b2** | Decode it, play it, tap the PCM | ✅ **GREEN** — Opus *and* AAC, tap numerically validated |
 | **c** | Render a live spectrum in ratatui | ✅ **GREEN** — 118 bands @ ~119 fps, inside CPU budget |
-| **a** | Authenticated read + write (like/dislike) | ⏸️ **Built, blocked on credentials** — see §6 |
+| **a** | Authenticated read + write (like/dislike) | ✅ **GREEN** — confirmed on a real account, 2026-09-05 |
 
 ---
 
@@ -112,13 +112,31 @@ This does not change the stack decision, but it does add an M1 requirement the o
 
 > **FR-P12 (new, M):** stream URLs must be resolved *ahead of need*. Resolve the next queue item during playback of the current one, cache resolved URLs until their `expire` timestamp, and show an explicit spinner whenever a cold resolve is unavoidable. The native (rustypipe) resolver should be primary precisely because it avoids process-spawn latency; yt-dlp is the safety net, not the default.
 
-## 8. R11 (account safety) — the one item still open
+## 8. R11 (account safety) — confirmed 2026-09-05
 
 The `auth` binary is written and compiles: cookie parsing (Netscape *and* raw header), SAPISIDHASH signing, an authenticated read (`account/account_menu`, `browse FEmusic_liked_videos`), and the write path (`like/like`, `like/dislike`, `like/removelike`).
 
 It is **read-only by default**; the write test is opt-in via `--like <videoId>` and restores the previous state afterwards.
 
-**It needs your credentials, which I will not obtain for you.** To finish this last M0 item:
+**Result:** confirmed against a real account. Authenticated read returned the
+account name and the Liked Songs page; `like/like` placed the track at the top
+of Liked Songs and `like/removelike` restored the previous state:
+
+```
+== write path (this mutates your real account) ==
+  already liked before : false
+  sent like for sWcLccMuCA8
+  present in liked now : true (at the top)
+  like removed again - previous state restored
+
+  WRITE PATH CONFIRMED
+```
+
+So the in-house InnerTube write client works: SAPISIDHASH signing, cookie auth,
+and the rating endpoints. **No third-party YouTube Music crate is needed for the
+ratings surface.**
+
+To reproduce:
 
 > **Updated in M1:** this now lives in the workspace as the `authcheck` binary.
 
