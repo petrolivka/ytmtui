@@ -51,7 +51,12 @@ jobs:
         if: matrix.rust == 'stable'
         run: cargo fmt --all -- --check
 
+      # Stable only: clippy's lint set changes between releases, so pinning it
+      # to the MSRV produces failures about style rather than about whether the
+      # code builds on the oldest supported compiler - which is what that job
+      # is for.
       - name: Clippy
+        if: matrix.rust == 'stable'
         run: cargo clippy --workspace --all-targets
 
       - name: Build

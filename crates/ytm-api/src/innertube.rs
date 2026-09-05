@@ -731,18 +731,26 @@ fn lyrics_browse_id(v: &Value) -> Option<String> {
     None
 }
 
+/// Is this subtitle run the artist, rather than a separator, a kind label or
+/// the release year?
+fn looks_like_artist(s: &str) -> bool {
+    let s = s.trim();
+    if s.is_empty() || s == "\u{2022}" {
+        return false;
+    }
+    if matches!(s, "Album" | "Single" | "EP" | "Playlist") {
+        return false;
+    }
+    // A bare four-digit run is the year.
+    !(s.len() == 4 && s.chars().all(|c| c.is_ascii_digit()))
+}
+
 /// The artist credited in a page header, used to fill in album tracklists.
 fn page_artist(v: &Value) -> Option<String> {
     for key in ["musicDetailHeaderRenderer", "musicResponsiveHeaderRenderer"] {
         if let Some(h) = json::find(v, key) {
             let runs = h.get("subtitle").map(json::runs).unwrap_or_default();
-            if let Some(a) = runs.iter().find(|s| {
-                let s = s.trim();
-                !s.is_empty()
-                    && s != "\u{2022}"
-                    && !matches!(s, "Album" | "Single" | "EP" | "Playlist")
-                    && !(s.len() == 4 && s.chars().all(|c| c.is_ascii_digit()))
-            }) {
+            if let Some(a) = runs.iter().find(|s| looks_like_artist(s)) {
                 return Some(a.trim().to_string());
             }
         }
