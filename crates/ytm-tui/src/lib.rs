@@ -24,25 +24,33 @@ pub use app::App;
 /// frame, positioned by hand over cells the renderer was told to skip.
 fn draw_graphics_cover(app: &App) -> Result<()> {
     use std::io::Write;
+
     // Fullscreen draws the spectrum alone. Without this the image would keep
     // being painted at the position the cover pane had before, because these
     // escapes bypass the renderer and nothing else erases them.
-    // Every path that declines to draw must also forget what was painted:
-    // whatever replaced the image - the fullscreen spectrum, a dialogue - has
-    // erased it, so it has to be sent again when we come back.
-    let forget = || *app.hit.painted.borrow_mut() = None;
+    // Every path that declines to draw must both forget what was painted and,
+    // on Kitty, actively remove it. A sixel image is pixels in the grid that
+    // the next text write covers up; a Kitty placement is an object that
+    // survives the redraw and stays until it is deleted.
+    let forget = || -> Result<()> {
+        let had = app.hit.painted.borrow_mut().take();
+        if had.is_some() && app.art_backend == ytm_art::Backend::Kitty {
+            let mut out = std::io::stdout().lock();
+            out.write_all(ytm_art::kitty_delete().as_bytes())?;
+            out.flush()?;
+        }
+        Ok(())
+    };
 
     if !app.show_art || !cover::is_graphics(app.art_backend) {
-        return Ok(());
+        return forget();
     }
     if app.viz_fullscreen || app.modal.is_some() || app.show_help {
-        forget();
-        return Ok(());
+        return forget();
     }
     let area = app.hit.cover.get();
     if area.width == 0 || area.height == 0 {
-        forget();
-        return Ok(());
+        return forget();
     }
     let Some(url) = app
         .player
@@ -51,8 +59,7 @@ fn draw_graphics_cover(app: &App) -> Result<()> {
         .as_ref()
         .and_then(|t| t.thumbnail.clone())
     else {
-        forget();
-        return Ok(());
+        return forget();
     };
     let want = ytm_art::at_size(
         &url,
@@ -72,6 +79,12 @@ fn draw_graphics_cover(app: &App) -> Result<()> {
     }
 
     let mut out = std::io::stdout().lock();
+    // Remove the previous placement first. Re-transmitting under the same id
+    // does not move an existing one, so after a resize the old placement would
+    // otherwise stay where it was.
+    if app.art_backend == ytm_art::Backend::Kitty {
+        out.write_all(ytm_art::kitty_delete().as_bytes())?;
+    }
     // Save the cursor, position it over the pane, draw, restore.
     write!(out, "\x1b7\x1b[{};{}H", area.y + 1, area.x + 1)?;
     match app.art_backend {
@@ -146,6 +159,14 @@ pub fn run(
     })();
 
     app.shutdown();
+    // A Kitty placement outlives the alternate screen on some terminals, so
+    // leaving one behind would put an album cover in the user's shell.
+    if app.art_backend == ytm_art::Backend::Kitty {
+        use std::io::Write;
+        let mut out = std::io::stdout().lock();
+        let _ = out.write_all(ytm_art::kitty_delete().as_bytes());
+        let _ = out.flush();
+    }
     if mouse_on {
         let _ = ratatui::crossterm::execute!(
             std::io::stdout(),

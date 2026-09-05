@@ -118,6 +118,21 @@ pub fn resize_for_cells(img: &RgbImage, cols: u16, rows: u16) -> RgbImage {
     )
 }
 
+/// The image id used for the cover.
+///
+/// Fixed rather than terminal-assigned so the placement can be deleted again:
+/// unlike sixel, a Kitty placement is an object that survives the text being
+/// redrawn over it, and stays until it is explicitly removed.
+const COVER_IMAGE_ID: u32 = 7714;
+
+/// Remove the cover image and its placements.
+///
+/// Needed whenever the cover stops being shown - fullscreen, a dialogue, art
+/// turned off - because redrawing the screen does not erase it.
+pub fn kitty_delete() -> String {
+    format!("\x1b_Ga=d,d=I,i={COVER_IMAGE_ID},q=2\x1b\\")
+}
+
 /// Kitty graphics protocol: a base64 PNG delivered in chunks.
 pub fn to_kitty(img: &RgbImage, cols: u16, rows: u16) -> Result<String> {
     use base64::Engine;
@@ -141,14 +156,16 @@ pub fn to_kitty(img: &RgbImage, cols: u16, rows: u16) -> Result<String> {
     while let Some(chunk) = chunks.next() {
         let more = if chunks.peek().is_some() { 1 } else { 0 };
         if first {
+            // q=2 suppresses the terminal's acknowledgement. Without it the
+            // reply arrives on stdin and the key parser has to cope with it.
             out.push_str(&format!(
-                "\x1b_Ga=T,f=100,c={cols},r={rows},m={more};{}\x1b\\",
+                "\x1b_Ga=T,f=100,i={COVER_IMAGE_ID},c={cols},r={rows},m={more},q=2;{}\x1b\\",
                 std::str::from_utf8(chunk).unwrap_or_default()
             ));
             first = false;
         } else {
             out.push_str(&format!(
-                "\x1b_Gm={more};{}\x1b\\",
+                "\x1b_Gm={more},q=2;{}\x1b\\",
                 std::str::from_utf8(chunk).unwrap_or_default()
             ));
         }
@@ -283,6 +300,28 @@ mod tests {
 
         c.mark_failed(url, Instant::now() - RETRY_AFTER - Duration::from_secs(1));
         assert!(!c.has(url), "an old failure should be retried");
+    }
+
+    /// A Kitty placement survives the screen being redrawn, so there has to be
+    /// a way to remove it, and the transmit has to name an id the delete can
+    /// refer to.
+    #[test]
+    fn kitty_images_can_be_deleted_again() {
+        let img = RgbImage::from_pixel(8, 8, Rgb([1, 2, 3]));
+        let seq = to_kitty(&img, 4, 2).unwrap();
+        assert!(
+            seq.contains(&format!("i={COVER_IMAGE_ID}")),
+            "transmit carries no image id"
+        );
+        assert!(seq.contains("q=2"), "responses are not suppressed");
+
+        let del = kitty_delete();
+        assert!(del.contains("a=d"), "not a delete command");
+        assert!(
+            del.contains(&format!("i={COVER_IMAGE_ID}")),
+            "delete targets no id"
+        );
+        assert!(del.starts_with("\x1b_G") && del.ends_with("\x1b\\"));
     }
 
     #[test]
