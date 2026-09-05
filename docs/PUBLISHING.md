@@ -12,6 +12,15 @@ The repository is `https://github.com/petrolivka/ytmtui`, already set as
   everywhere in the tree.
 - Private vulnerability reporting is enabled, so the advisory link in
   `SECURITY.md` and the issue template resolves.
+- **Licence: GPL-3.0-or-later, decided.** Nothing forced it — all 336
+  transitive dependencies are permissive (MIT, Apache-2.0, Zlib, ISC,
+  Unicode-3.0). It was chosen because ytmtui is an application rather than a
+  library: the only realistic derivative is a fork, so copyleft costs almost
+  nothing and keeps improvements available.
+
+  Worth knowing for later: relicensing to something permissive would now need
+  every contributor's agreement, so this is effectively settled once the first
+  outside pull request lands.
 
 ## Must do
 
@@ -38,13 +47,6 @@ judgement call, not a settled question:
   network access once per clone, and CI needs a step to generate them, which
   reintroduces exactly the "is CI red because YouTube changed?" problem the
   fixtures exist to remove.
-
-### The licence
-
-GPL-3.0-or-later, and **nothing forces it** — all 336 transitive dependencies
-are permissive (MIT, Apache-2.0, Zlib, ISC, Unicode-3.0). If you would rather
-have MIT or Apache-2.0, change `license` in `Cargo.toml`, replace `LICENSE`,
-and update both packaging files and the README licence section.
 
 ### The name
 
