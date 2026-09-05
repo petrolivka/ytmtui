@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod clipboard;
+pub mod cover;
 pub mod keymap;
 pub mod modal;
 pub mod nav;
@@ -16,7 +17,56 @@ use std::time::{Duration, Instant};
 use ytm_api::MusicBackend;
 use ytm_player::{PlayerHandle, Tap};
 
+
 pub use app::App;
+
+/// Sixel and the Kitty protocol are raw escapes, so they are written after the
+/// frame, positioned by hand over cells the renderer was told to skip.
+fn draw_graphics_cover(app: &App) -> Result<()> {
+    use std::io::Write;
+    if !app.show_art || !cover::is_graphics(app.art_backend) {
+        return Ok(());
+    }
+    let area = app.hit.cover.get();
+    if area.width == 0 || area.height == 0 {
+        return Ok(());
+    }
+    let Some(url) = app
+        .player
+        .status()
+        .current
+        .as_ref()
+        .and_then(|t| t.thumbnail.clone())
+    else {
+        return Ok(());
+    };
+    let want = ytm_art::at_size(
+        &url,
+        (area.width as u32).max(area.height as u32 * 2).clamp(64, 544),
+    );
+    let Some(img) = app.art_cache.get(&want) else {
+        return Ok(());
+    };
+
+    let mut out = std::io::stdout().lock();
+    // Save the cursor, position it over the pane, draw, restore.
+    write!(out, "\x1b7\x1b[{};{}H", area.y + 1, area.x + 1)?;
+    match app.art_backend {
+        ytm_art::Backend::Kitty => {
+            if let Ok(seq) = ytm_art::to_kitty(&img, area.width, area.height) {
+                out.write_all(seq.as_bytes())?;
+            }
+        }
+        ytm_art::Backend::Sixel => {
+            let scaled = ytm_art::resize_for_cells(&img, area.width, area.height);
+            out.write_all(ytm_art::sixel::encode(&scaled).as_bytes())?;
+        }
+        _ => {}
+    }
+    write!(out, "\x1b8")?;
+    out.flush()?;
+    Ok(())
+}
 
 /// Put the terminal back into a sane state. Exposed so the binary's panic hook
 /// can call it without depending on ratatui directly.
@@ -60,6 +110,7 @@ pub fn run(
         while !app.should_quit {
             let t0 = Instant::now();
             terminal.draw(|f| ui::draw(f, &app))?;
+            draw_graphics_cover(&app)?;
             app.tick();
             // Spend whatever is left of the frame waiting for input, so an idle
             // app costs nothing but a keypress is still handled immediately.

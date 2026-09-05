@@ -151,6 +151,16 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    println!("\n== cover art ==");
+    if let Ok(p) = yt.search("aphex twin", SearchFilter::Songs) {
+        for t in p.rows.iter().filter_map(|r| r.as_track()).take(3) {
+            match &t.thumbnail {
+                Some(u) => println!("   {:<26} {}", trunc(&t.title, 26), trunc(u, 78)),
+                None => println!("   {:<26} (no thumbnail)", trunc(&t.title, 26)),
+            }
+        }
+    }
+
     println!("\n== lyrics ==");
     for id in ["sWcLccMuCA8", "EnjOz4wtS8Q"] {
         let vid = ytm_core::VideoId(id.into());

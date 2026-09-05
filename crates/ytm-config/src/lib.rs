@@ -21,6 +21,7 @@ pub struct Config {
     pub general: General,
     pub audio: Audio,
     pub visualizer: Visualizer,
+    pub art: Art,
     pub theme: Theme,
     /// Binding -> action, e.g. `"ctrl+n" = "next"`. Merged over the defaults,
     /// so a user only has to list what they want to change.
@@ -91,6 +92,24 @@ pub struct Visualizer {
     pub bar_step: u16,
 }
 
+/// Album art beside the spectrum.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Art {
+    pub enabled: bool,
+    /// auto | halfblock | sixel | kitty | off
+    ///
+    /// "auto" picks by terminal; half blocks work everywhere, including
+    /// terminals with no graphics protocol at all.
+    pub backend: String,
+}
+
+impl Default for Art {
+    fn default() -> Self {
+        Self { enabled: true, backend: "auto".into() }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Theme {
@@ -148,6 +167,7 @@ impl Default for Config {
             general: General::default(),
             audio: Audio::default(),
             visualizer: Visualizer::default(),
+            art: Art::default(),
             theme: Theme::default(),
             keys: HashMap::new(),
         }
@@ -221,6 +241,7 @@ pub fn default_keymap() -> Vec<(Chord, Action)> {
         (c('v'), A::CycleVisualizer),
         (c('z'), A::ToggleVisualizerFullscreen),
         (c('L'), A::ToggleLyrics),
+        (c('c'), A::ToggleArt),
         (c(':'), A::CommandPalette),
         (c('?'), A::Help),
         (c('q'), A::Quit),

@@ -60,6 +60,7 @@ pub enum AppEvent {
     Lyrics(VideoId, Result<Option<String>, String>),
     Playlists(Result<Vec<PlaylistRef>, String>),
     Suggestions(String, Vec<String>),
+    ArtReady,
     /// A write finished; refresh whatever view is showing.
     Wrote(String, bool),
     Toast(String),
@@ -73,6 +74,9 @@ pub struct Hitboxes {
     pub content: Cell<Rect>,
     pub queue: Cell<Rect>,
     pub progress: Cell<Rect>,
+    /// Inner area of the cover pane, for fetching at the right size and for
+    /// positioning graphics escapes.
+    pub cover: Cell<Rect>,
 }
 
 /// List scroll offsets, owned here rather than rebuilt per frame, so a click
@@ -106,6 +110,14 @@ pub struct App {
     pub viz_fullscreen: bool,
     pub show_help: bool,
     pub show_lyrics: bool,
+    pub show_art: bool,
+    pub art_backend: ytm_art::Backend,
+    pub art_cache: Arc<ytm_art::ArtCache>,
+    /// Rendered cells for the current cover, keyed by the size they were made
+    /// for so a resize re-renders rather than stretching.
+    pub art_cells: Vec<Vec<ytm_art::Cell>>,
+    pub art_for: Option<(String, u16, u16)>,
+    art_fetching: bool,
     pub modal: Option<Modal>,
     pub search_history: Vec<String>,
     pub suggestions: Vec<String>,
@@ -180,6 +192,15 @@ impl App {
             viz_fullscreen: false,
             show_help: false,
             show_lyrics: false,
+            show_art: cfg.art.enabled,
+            art_backend: ytm_art::Backend::parse(&cfg.art.backend)
+                .unwrap_or_else(ytm_art::Backend::detect),
+            art_cache: Arc::new(
+                ytm_art::ArtCache::new().unwrap_or_else(|_| unreachable!("client builder")),
+            ),
+            art_cells: Vec::new(),
+            art_for: None,
+            art_fetching: false,
             modal: None,
             search_history: crate::session::load_search_history(),
             suggestions: Vec::new(),
@@ -478,9 +499,12 @@ impl App {
                         self.suggestions = list;
                     }
                 }
+                AppEvent::ArtReady => self.art_fetching = false,
                 AppEvent::Toast(m) => self.toast(m),
             }
         }
+        let c = self.hit.cover.get();
+        self.ensure_art(c.width, c.height);
         self.sample_spectrum();
         self.poll_config();
         self.poll_suggestions();
@@ -504,6 +528,8 @@ impl App {
         self.now = TrackState { id: cur.clone(), ..Default::default() };
         self.lyrics = None;
         self.lyrics_scroll = 0;
+        self.art_cells.clear();
+        self.art_for = None;
         if self.show_lyrics {
             self.fetch_lyrics();
         }
@@ -787,6 +813,44 @@ impl App {
         let Some(chord) = chord_of(k) else { return };
         let Some(action) = self.keymap.get(&chord).copied() else { return };
         self.do_action(action);
+    }
+
+    /// Make sure the cover for the playing track is fetched and rendered at
+    /// the size the pane currently is.
+    pub fn ensure_art(&mut self, cols: u16, rows: u16) {
+        if !self.show_art || cols == 0 || rows == 0 {
+            return;
+        }
+        let Some(url) = self
+            .player
+            .status()
+            .current
+            .as_ref()
+            .and_then(|t| t.thumbnail.clone())
+        else {
+            return;
+        };
+        // Ask the image host for roughly what will be drawn; upscaling a 60px
+        // thumbnail looks far worse than requesting the right size.
+        let want = ytm_art::at_size(&url, (cols as u32).max(rows as u32 * 2).clamp(64, 544));
+        if self.art_for.as_ref() == Some(&(want.clone(), cols, rows)) {
+            return;
+        }
+        if let Some(img) = self.art_cache.get(&want) {
+            self.art_cells = ytm_art::to_half_blocks(&img, cols, rows);
+            self.art_for = Some((want, cols, rows));
+            return;
+        }
+        if self.art_cache.has(&want) || self.art_fetching {
+            return; // already tried, or a fetch is in flight
+        }
+        self.art_fetching = true;
+        let cache = self.art_cache.clone();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = cache.fetch(&want);
+            let _ = tx.send(AppEvent::ArtReady);
+        });
     }
 
     /// Take one column of history per rendered frame, and decay the beat glow.
@@ -1277,6 +1341,19 @@ impl App {
 
             CycleVisualizer => self.viz_style = self.viz_style.next(),
             ToggleVisualizerFullscreen => self.viz_fullscreen = !self.viz_fullscreen,
+            ToggleArt => {
+                self.show_art = !self.show_art;
+                let on = self.show_art;
+                if !on {
+                    self.art_cells.clear();
+                    self.art_for = None;
+                }
+                self.toast(format!(
+                    "album art {} ({})",
+                    if on { "on" } else { "off" },
+                    self.art_backend.name()
+                ));
+            }
             ToggleLyrics => {
                 self.show_lyrics = !self.show_lyrics;
                 if self.show_lyrics {

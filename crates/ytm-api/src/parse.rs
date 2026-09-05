@@ -331,6 +331,7 @@ pub fn track_from(item: &Value) -> Option<Track> {
     }
 
     let (feedback_token_add, feedback_token_remove, in_library) = library_tokens(item);
+    let thumbnail = json::thumbnail(item);
     let set_video_id = item
         .get("playlistItemData")
         .and_then(|d| d.get("playlistSetVideoId"))
@@ -350,6 +351,7 @@ pub fn track_from(item: &Value) -> Option<Track> {
         album_id,
         artist_id,
         set_video_id,
+        thumbnail,
     })
 }
 

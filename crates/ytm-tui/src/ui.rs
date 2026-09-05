@@ -16,6 +16,7 @@ use ytm_config::Action;
 use ytm_core::{fmt_duration, PlayerStatus, Row};
 
 use crate::app::{App, Focus, Mode};
+use crate::cover::{self, Cover};
 use crate::modal::Modal;
 use crate::nav::Dest;
 use crate::spectrum::Spectrum;
@@ -54,7 +55,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     let [header, body, viz, now, foot] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(4),
-        Constraint::Length(spectrum_height(area.height)),
+        Constraint::Length(spectrum_height(area.height, app.show_art)),
         Constraint::Length(4),
         Constraint::Length(1),
     ])
@@ -95,7 +96,23 @@ pub fn draw(f: &mut Frame, app: &App) {
         }
     }
 
-    draw_spectrum(f, app, viz);
+    // The cover takes the left of the visualiser band when there is room for
+    // it and still enough width left for the spectrum to mean anything.
+    // Based on the track having art, not on the art being loaded: the pane has
+    // to be laid out before its size is known, and its size is what the fetch
+    // needs.
+    let show_cover = app.show_art
+        && status.current.as_ref().and_then(|t| t.thumbnail.as_ref()).is_some();
+    let cover_w = cover::square_width(viz.height.saturating_sub(2)) + 2;
+    if show_cover && viz.width >= cover_w + 30 {
+        let [art, spec] =
+            Layout::horizontal([Constraint::Length(cover_w), Constraint::Min(28)]).areas(viz);
+        draw_cover(f, app, art);
+        draw_spectrum(f, app, spec);
+    } else {
+        app.hit.cover.set(Rect::default());
+        draw_spectrum(f, app, viz);
+    }
     draw_now_playing(f, app, &status, now);
     draw_status_bar(f, app, &status, foot);
     draw_toast(f, app, area);
@@ -239,12 +256,20 @@ fn draw_modal(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn spectrum_height(total: u16) -> u16 {
-    match total {
+/// The visualiser band gets more height when the cover is showing, because the
+/// cover is square: its width is twice this, so a short band makes a postage
+/// stamp.
+fn spectrum_height(total: u16, with_art: bool) -> u16 {
+    let base = match total {
         0..=18 => 4,
         19..=28 => 6,
         29..=40 => 9,
         _ => (total / 4).min(14),
+    };
+    if with_art {
+        (total / 3).clamp(base, 18)
+    } else {
+        base
     }
 }
 
@@ -509,6 +534,24 @@ fn draw_lyrics(f: &mut Frame, app: &App, area: Rect) {
             .scroll((app.lyrics_scroll, 0)),
         inner,
     );
+}
+
+fn draw_cover(f: &mut Frame, app: &App, area: Rect) {
+    let b = block(app, "cover".into(), false);
+    let inner = b.inner(area);
+    f.render_widget(b, area);
+    app.hit.cover.set(inner);
+
+    if cover::is_graphics(app.art_backend) {
+        // Written after the frame as a raw escape; keep the cells clear.
+        cover::reserve(inner, f.buffer_mut());
+        return;
+    }
+    if app.art_cells.is_empty() {
+        f.render_widget(Paragraph::new("\u{2026}").fg(app.theme.dim), inner);
+        return;
+    }
+    f.render_widget(Cover { cells: &app.art_cells }, inner);
 }
 
 fn draw_spectrum(f: &mut Frame, app: &App, area: Rect) {

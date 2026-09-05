@@ -66,6 +66,8 @@ pub struct Track {
     /// Identifies this track *within a particular playlist*; required to
     /// remove it, and not the same as the video id.
     pub set_video_id: Option<String>,
+    /// Cover image URL, if the response carried one.
+    pub thumbnail: Option<String>,
 }
 
 impl Track {
@@ -83,6 +85,7 @@ impl Track {
             album_id: None,
             artist_id: None,
             set_video_id: None,
+            thumbnail: None,
         }
     }
 

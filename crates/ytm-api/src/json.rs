@@ -96,6 +96,25 @@ pub fn find_duration(v: &Value) -> Option<u64> {
     }
 }
 
+/// The largest thumbnail URL in an item, if it has any.
+///
+/// The size in the URL is only a hint; `ytm_art::at_size` rewrites it to the
+/// size that will actually be drawn.
+pub fn thumbnail(v: &Value) -> Option<String> {
+    let list = find(v, "thumbnails")?.as_array()?;
+    let mut best: Option<(u64, &str)> = None;
+    for t in list {
+        let Some(url) = t.get("url").and_then(|u| u.as_str()) else {
+            continue;
+        };
+        let w = t.get("width").and_then(|w| w.as_u64()).unwrap_or(0);
+        if best.map(|(bw, _)| w > bw).unwrap_or(true) {
+            best = Some((w, url));
+        }
+    }
+    best.map(|(_, u)| u.to_string())
+}
+
 /// Parse "3:33" or "1:02:03" into seconds.
 pub fn parse_duration(s: &str) -> Option<u64> {
     let s = s.trim();

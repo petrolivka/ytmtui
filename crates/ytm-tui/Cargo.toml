@@ -10,6 +10,7 @@ ytm-api = { path = "../ytm-api" }
 ytm-player = { path = "../ytm-player" }
 ytm-viz = { path = "../ytm-viz" }
 ytm-config = { path = "../ytm-config" }
+ytm-art = { path = "../ytm-art" }
 anyhow.workspace = true
 ratatui.workspace = true
 arc-swap.workspace = true

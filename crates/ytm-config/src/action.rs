@@ -60,6 +60,7 @@ pub enum Action {
     CycleVisualizer,
     ToggleVisualizerFullscreen,
     ToggleLyrics,
+    ToggleArt,
     CommandPalette,
     Help,
     Quit,
@@ -114,6 +115,7 @@ impl Action {
             CycleVisualizer => "Cycle visualiser style",
             ToggleVisualizerFullscreen => "Fullscreen visualiser",
             ToggleLyrics => "Toggle lyrics",
+            ToggleArt => "Toggle album art",
             CommandPalette => "Command palette",
             Help => "Help",
             Quit => "Quit",
@@ -130,7 +132,8 @@ impl Action {
             ToggleLibrary, AddToPlaylist, NewPlaylist, RenamePlaylist, DeletePlaylist,
             RemoveFromPlaylist, ToggleSubscribe, CopyLink, GoToArtist, GoToAlbum,
             NextTab, PrevTab, NextPane, PrevPane, CycleVisualizer, ToggleVisualizerFullscreen,
-            ToggleLyrics, CommandPalette, Help, Quit,
+            ToggleLyrics,
+    ToggleArt, CommandPalette, Help, Quit,
         ]
     };
 }
