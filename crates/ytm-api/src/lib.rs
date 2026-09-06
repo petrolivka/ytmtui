@@ -10,16 +10,20 @@ pub mod parse;
 use anyhow::Result;
 use ytm_core::{BrowseId, PlaylistId, Rating, Track, VideoId};
 
-pub use innertube::{ExploreSection, Innertube, LibrarySection, RowPage, SearchFilter};
+pub use innertube::{ExploreSection, Innertube, LibrarySection, PageFilter, RowPage, SearchFilter};
 
 /// Everything the app needs from the network. One trait so an InnerTube change
 /// or a library swap stays a contained fix.
 pub trait MusicBackend: Send + Sync {
     fn search(&self, query: &str, filter: SearchFilter) -> Result<RowPage>;
     fn search_songs(&self, query: &str) -> Result<Vec<Track>>;
-    fn home(&self) -> Result<RowPage>;
+    /// `params` is one of the feed's own header chips, or None for unfiltered.
+    fn home(&self, params: Option<&str>) -> Result<RowPage>;
     fn library(&self, section: LibrarySection) -> Result<RowPage>;
     fn explore(&self, section: ExploreSection) -> Result<RowPage>;
+    /// A mood or genre category, addressed by the browse id and opaque params
+    /// carried on the tile that led to it.
+    fn category(&self, id: &BrowseId, params: Option<&str>) -> Result<RowPage>;
     /// Next page of a list, addressed by the token the previous page returned.
     fn continue_rows(&self, token: &str) -> Result<RowPage>;
     /// Lyrics for a track, or None when YouTube Music has none.
@@ -54,14 +58,17 @@ impl MusicBackend for Innertube {
     fn search_songs(&self, query: &str) -> Result<Vec<Track>> {
         Innertube::search_songs(self, query)
     }
-    fn home(&self) -> Result<RowPage> {
-        Innertube::home(self)
+    fn home(&self, params: Option<&str>) -> Result<RowPage> {
+        Innertube::home(self, params)
     }
     fn library(&self, section: LibrarySection) -> Result<RowPage> {
         Innertube::library(self, section)
     }
     fn explore(&self, section: ExploreSection) -> Result<RowPage> {
         Innertube::explore(self, section)
+    }
+    fn category(&self, id: &BrowseId, params: Option<&str>) -> Result<RowPage> {
+        Innertube::category(self, id, params)
     }
     fn continue_rows(&self, token: &str) -> Result<RowPage> {
         Innertube::continue_rows(self, token)

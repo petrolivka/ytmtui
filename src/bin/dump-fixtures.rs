@@ -83,6 +83,8 @@ fn main() -> Result<()> {
         ("browse_charts", "FEmusic_charts"),
         ("browse_new_releases", "FEmusic_new_releases"),
         ("browse_explore", "FEmusic_explore"),
+        ("browse_home", "FEmusic_home"),
+        ("browse_moods", "FEmusic_moods_and_genres"),
     ] {
         save(name, &yt.debug_browse(id)?)?;
     }

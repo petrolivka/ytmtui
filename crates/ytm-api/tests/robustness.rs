@@ -96,6 +96,7 @@ fn exercise(v: &Value) {
     let rows = parse::page_rows(v);
     let flat = parse::flat_rows(v);
     let queue = parse::flat_rows_from_queue(v);
+    let filters = parse::page_filters(v);
     let _ = parse::continuation(v);
     let _ = json::thumbnail(v);
     let _ = json::find_duration(v);
@@ -111,6 +112,37 @@ fn exercise(v: &Value) {
     for t in &queue {
         assert!(t.id.is_valid());
     }
+    // A category is nothing without somewhere to go: an id-less tile would
+    // render as a row that does nothing when opened.
+    for r in rows.iter().chain(flat.iter()) {
+        if let ytm_core::Row::Category(c) = r {
+            assert!(!c.id.0.trim().is_empty(), "produced a category with no id");
+            assert!(
+                !c.title.trim().is_empty(),
+                "produced a category with no title"
+            );
+            assert!(
+                c.params.as_deref() != Some(""),
+                "produced a category with empty params, which is not the same as none"
+            );
+        }
+    }
+    // The synthesised "All" is the only filter allowed to have no params, and
+    // it only exists when there are real chips beside it.
+    if !filters.is_empty() {
+        assert!(filters.len() > 1, "an All chip on its own filters nothing");
+        assert!(
+            filters[0].params.is_none(),
+            "the All chip must be unfiltered"
+        );
+        for f in filters.iter().skip(1) {
+            assert!(!f.label.trim().is_empty(), "produced a chip with no label");
+            assert!(
+                f.params.as_deref().is_some_and(|p| !p.is_empty()),
+                "produced a chip that would re-fetch the unfiltered page"
+            );
+        }
+    }
 }
 
 #[test]
@@ -123,6 +155,9 @@ fn mutated_responses_never_panic() {
         "browse_artist",
         "browse_album",
         "browse_charts",
+        "browse_explore",
+        "browse_home",
+        "browse_moods",
         "watch_next",
     ];
     for name in names {
@@ -154,6 +189,26 @@ fn degenerate_documents_are_handled() {
                 "playlistItemData": 12,
             }
         }),
+        // A navigation tile with nothing to navigate to.
+        serde_json::json!({
+            "musicNavigationButtonRenderer": {
+                "buttonText": { "runs": [{ "text": "" }] },
+                "clickCommand": { "browseEndpoint": { "browseId": "", "params": "" } },
+            }
+        }),
+        // A chip cloud whose every field is the wrong type.
+        serde_json::json!({
+            "chipCloudRenderer": {
+                "chips": [
+                    { "chipCloudChipRenderer": { "text": 5, "navigationEndpoint": "no" } },
+                    { "chipCloudChipRenderer": {} },
+                    "not even an object",
+                ]
+            }
+        }),
+        // A chip cloud with no chips at all, which must not synthesise an
+        // "All" that filters nothing.
+        serde_json::json!({ "chipCloudRenderer": { "chips": [] } }),
         // Deeply nested emptiness.
         serde_json::json!({"a":{"b":{"c":{"d":{"e":{"f":{"g":{}}}}}}}}),
     ] {

@@ -7,7 +7,7 @@ use ytm_api::{LibrarySection, SearchFilter};
 use ytm_core::{BrowseId, Row};
 
 fn summarise(rows: &[Row]) -> String {
-    let (mut h, mut t, mut al, mut ar, mut pl) = (0, 0, 0, 0, 0);
+    let (mut h, mut t, mut al, mut ar, mut pl, mut cat) = (0, 0, 0, 0, 0, 0);
     for r in rows {
         match r {
             Row::Header(_) => h += 1,
@@ -15,9 +15,10 @@ fn summarise(rows: &[Row]) -> String {
             Row::Album(_) => al += 1,
             Row::Artist(_) => ar += 1,
             Row::Playlist(_) => pl += 1,
+            Row::Category(_) => cat += 1,
         }
     }
-    format!("{t} tracks, {al} albums, {ar} artists, {pl} playlists, {h} headers")
+    format!("{t} tracks, {al} albums, {ar} artists, {pl} playlists, {cat} categories, {h} headers")
 }
 
 fn show(rows: &[Row], n: usize) {
@@ -55,10 +56,67 @@ fn main() -> Result<()> {
     println!("authenticated: {}\n", yt.is_authenticated());
 
     println!("== home ==");
-    match yt.home() {
+    let mut home_chips: Vec<(String, String)> = Vec::new();
+    match yt.home(None) {
         Ok(p) => {
             println!("   {}{}", summarise(&p.rows), more(&p));
             show(&p.rows, 10);
+            if !p.filters.is_empty() {
+                let labels: Vec<&str> = p.filters.iter().map(|f| f.label.as_str()).collect();
+                println!("   chips: {}", labels.join(" "));
+                home_chips = p
+                    .filters
+                    .iter()
+                    .filter_map(|f| f.params.clone().map(|x| (f.label.clone(), x)))
+                    .collect();
+            } else {
+                println!("   chips: none");
+            }
+        }
+        Err(e) => println!("   FAILED: {e}"),
+    }
+
+    // Every chip is the same browse id with different params. A chip that comes
+    // back empty is not necessarily broken - Podcasts leads to a content type
+    // this client does not render - but a row of zeroes means params are being
+    // dropped somewhere.
+    if !home_chips.is_empty() {
+        println!("\n== home, per chip ==");
+        for (label, params) in &home_chips {
+            match yt.home(Some(params)) {
+                Ok(p) => println!("   {label:<12} {}{}", summarise(&p.rows), more(&p)),
+                Err(e) => println!("   {label:<12} FAILED: {e}"),
+            }
+        }
+    }
+
+    println!("\n== explore ==");
+    for sec in ytm_api::ExploreSection::ALL {
+        match yt.explore(sec) {
+            Ok(p) => println!("   {:<14} {}{}", sec.label(), summarise(&p.rows), more(&p)),
+            Err(e) => println!("   {:<14} FAILED: {e}", sec.label()),
+        }
+    }
+
+    println!("\n== moods & genres ==");
+    match yt.category(&BrowseId("FEmusic_moods_and_genres".into()), None) {
+        Ok(p) => {
+            println!("   {}{}", summarise(&p.rows), more(&p));
+            show(&p.rows, 8);
+            // Open one, to prove params survive the round trip.
+            let first = p.rows.iter().find_map(|r| match r {
+                Row::Category(c) => Some(c.clone()),
+                _ => None,
+            });
+            if let Some(c) = first {
+                match yt.category(&c.id, c.params.as_deref()) {
+                    Ok(q) => {
+                        println!("   \"{}\" -> {}{}", c.title, summarise(&q.rows), more(&q));
+                        show(&q.rows, 6);
+                    }
+                    Err(e) => println!("   category {} FAILED: {e}", c.title),
+                }
+            }
         }
         Err(e) => println!("   FAILED: {e}"),
     }

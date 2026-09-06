@@ -234,6 +234,21 @@ pub struct PlaylistRef {
     pub subtitle: String,
 }
 
+/// A card pointing at a browse destination that is not an entity: the mood and
+/// genre tiles behind Explore, and the tiles that lead to Charts and New
+/// releases.
+///
+/// Every mood and genre shares one browse id and is told apart purely by
+/// `params`, so a category without its params is not a destination. The value
+/// is opaque and region-dependent - it is read from the response and never
+/// constructed here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CategoryRef {
+    pub id: BrowseId,
+    pub params: Option<String>,
+    pub title: String,
+}
+
 /// One line in the main pane.
 ///
 /// Home, search, library and every entity page render through this single
@@ -246,6 +261,7 @@ pub enum Row {
     Album(AlbumRef),
     Artist(ArtistRef),
     Playlist(PlaylistRef),
+    Category(CategoryRef),
 }
 
 impl Row {
@@ -260,6 +276,7 @@ impl Row {
             Row::Album(a) => &a.title,
             Row::Artist(a) => &a.name,
             Row::Playlist(p) => &p.title,
+            Row::Category(c) => &c.title,
         }
     }
 
@@ -276,6 +293,7 @@ impl Row {
             },
             Row::Artist(a) => a.subtitle.clone(),
             Row::Playlist(p) => p.subtitle.clone(),
+            Row::Category(_) => String::new(),
         }
     }
 
@@ -288,6 +306,7 @@ impl Row {
             Row::Album(_) => "album".into(),
             Row::Artist(_) => "artist".into(),
             Row::Playlist(_) => "playlist".into(),
+            Row::Category(_) => "category".into(),
         }
     }
 

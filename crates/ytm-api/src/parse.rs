@@ -8,7 +8,8 @@
 use serde_json::Value;
 use std::time::Duration;
 use ytm_core::{
-    AlbumRef, ArtistRef, BrowseId, PlaylistId, PlaylistRef, Rating, Row, Track, VideoId,
+    AlbumRef, ArtistRef, BrowseId, CategoryRef, PlaylistId, PlaylistRef, Rating, Row, Track,
+    VideoId,
 };
 
 use crate::json;
@@ -123,6 +124,7 @@ pub fn flat_rows(v: &Value) -> Vec<Row> {
     let mut items = Vec::new();
     json::find_all(v, "musicResponsiveListItemRenderer", &mut items);
     json::find_all(v, "musicTwoRowItemRenderer", &mut items);
+    json::find_all(v, "musicNavigationButtonRenderer", &mut items);
     dedupe(items.iter().filter_map(|i| item_row(i)).collect())
 }
 
@@ -154,6 +156,8 @@ fn shelf_items<'a>(kind: &str, shelf: &'a Value) -> Vec<&'a Value> {
                 out.push(x);
             } else if let Some(x) = entry.get("musicTwoRowItemRenderer") {
                 out.push(x);
+            } else if let Some(x) = entry.get("musicNavigationButtonRenderer") {
+                out.push(x);
             }
         }
     }
@@ -165,6 +169,11 @@ pub fn item_row(item: &Value) -> Option<Row> {
     // Playable? Then it is a track, whatever renderer it came from.
     if let Some(t) = track_from(item) {
         return Some(Row::Track(t));
+    }
+    // A mood/genre tile is shaped nothing like a card: buttonText rather than
+    // title, clickCommand rather than navigationEndpoint.
+    if let Some(c) = category_from(item) {
+        return Some(Row::Category(c));
     }
 
     let nav = item
@@ -209,6 +218,101 @@ pub fn item_row(item: &Value) -> Option<Row> {
         })),
         PageType::Unknown => None,
     }
+}
+
+/// A `musicNavigationButtonRenderer`: the coloured tiles that make up Explore
+/// and the Moods & genres page.
+///
+/// These carry no page type, so they cannot go through `item_row`'s usual
+/// route - and every category shares the browse id
+/// `FEmusic_moods_and_genres_category`, which is why `params` is carried
+/// through rather than dropped.
+fn category_from(item: &Value) -> Option<CategoryRef> {
+    let title = item.get("buttonText").and_then(json::text)?;
+    if title.trim().is_empty() {
+        return None;
+    }
+    let browse = item
+        .get("clickCommand")
+        .or_else(|| item.get("navigationEndpoint"))?
+        .get("browseEndpoint")?;
+    let id = browse.get("browseId").and_then(|b| b.as_str())?;
+    if id.trim().is_empty() {
+        return None;
+    }
+    Some(CategoryRef {
+        id: BrowseId(id.to_string()),
+        params: browse
+            .get("params")
+            .and_then(|p| p.as_str())
+            .filter(|p| !p.is_empty())
+            .map(|p| p.to_string()),
+        title,
+    })
+}
+
+/// One chip from a page's header chip cloud.
+///
+/// A chip is the same page browsed again with different `params`, so applying
+/// one is a re-fetch rather than a filter over rows already in hand.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageFilter {
+    pub label: String,
+    /// `None` is the unfiltered page - the state the chips deselect back to.
+    pub params: Option<String>,
+}
+
+/// The header chip cloud, if the page has one (Home's mood chips: Relax,
+/// Energize, Workout, Commute, Focus...).
+///
+/// The response marks no chip as selected and offers no "All" chip; getting
+/// back to the unfiltered page is a plain browse with no params, so that entry
+/// is synthesised here to give the caller one uniform list to cycle through.
+pub fn page_filters(v: &Value) -> Vec<PageFilter> {
+    let Some(cloud) = json::find(v, "chipCloudRenderer") else {
+        return Vec::new();
+    };
+    let Some(chips) = cloud.get("chips").and_then(|c| c.as_array()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PageFilter> = Vec::with_capacity(chips.len() + 1);
+    for chip in chips {
+        let Some(c) = chip.get("chipCloudChipRenderer") else {
+            continue;
+        };
+        // A chip whose endpoint is not a browse - the "Save" chip on a watch
+        // queue is a modal - is not a filter and must not look like one.
+        let Some(params) = c
+            .get("navigationEndpoint")
+            .and_then(|n| n.get("browseEndpoint"))
+            .and_then(|b| b.get("params"))
+            .and_then(|p| p.as_str())
+            .filter(|p| !p.is_empty())
+        else {
+            continue;
+        };
+        let Some(label) = c.get("text").and_then(json::text) else {
+            continue;
+        };
+        if label.trim().is_empty() || out.iter().any(|f| f.label == label) {
+            continue;
+        }
+        out.push(PageFilter {
+            label,
+            params: Some(params.to_string()),
+        });
+    }
+    if out.is_empty() {
+        return out;
+    }
+    out.insert(
+        0,
+        PageFilter {
+            label: "All".into(),
+            params: None,
+        },
+    );
+    out
 }
 
 /// Album subtitles vary by surface: "Album • Aphex Twin • 1992" in search, but
@@ -423,6 +527,10 @@ fn dedupe(rows: Vec<Row>) -> Vec<Row> {
             Row::Playlist(p) => out
                 .iter()
                 .any(|x| matches!(x, Row::Playlist(y) if y.id == p.id)),
+            // Categories share one browse id, so identity is the params.
+            Row::Category(c) => out
+                .iter()
+                .any(|x| matches!(x, Row::Category(y) if y.id == c.id && y.params == c.params)),
         };
         if !dup {
             out.push(r);
