@@ -46,7 +46,7 @@ never sign in, and `--anonymous` forces it.
 
 | | |
 |---|---|
-| **Browse** | Home feed, Explore, Charts, New releases |
+| **Browse** | Home feed with mood filters, Explore, moods & genres, Charts, New releases |
 | **Library** | Liked songs, playlists, albums, artists, history |
 | **Pages** | Artist, album and playlist pages with back-navigation |
 | **Search** | Songs, albums, artists and playlists, with suggestions and history |
@@ -147,7 +147,7 @@ reported at startup and skipped rather than throwing the whole config away.
 | `Enter` | open: play, or descend into album/artist/playlist | | `-` / `d` | thumbs down (toggles, skips) |
 | `Esc` | back | | `a` | add to / remove from library |
 | `Tab` / `Shift-Tab` | cycle sidebar / content / queue | | `s` / `r` | shuffle / repeat |
-| `[` `]` | previous / next search tab | | `R` / `A` | radio from selection / autoplay |
+| `[` `]` | previous / next search tab, or Home mood filter | | `R` / `A` | radio from selection / autoplay |
 | `g` / `G` | go to artist / album | | `9` / `0` | volume down / up |
 | `o` / `e` | play next / queue at end | | `v` / `z` | visualiser style / fullscreen |
 | `x` | remove from queue | | `L` / `c` | lyrics / album art |
@@ -223,7 +223,7 @@ crates/ytm-tui      ratatui views, spectrum widget, navigation
 See [CONTRIBUTING.md](CONTRIBUTING.md). In short:
 
 ```bash
-cargo test --workspace                  # 53 tests; the parser suites need no network
+cargo test --workspace                  # 101 tests; the parser suites need no network
 cargo clippy --workspace --all-targets  # must be clean
 cargo fmt --all
 cargo run --features dev-tools --bin probe          # read-only check of every API surface

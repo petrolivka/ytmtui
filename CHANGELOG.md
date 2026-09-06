@@ -14,6 +14,14 @@ what was built and what was learned.
 - **Browsing** — Home feed, Explore, Charts, New releases, the full library
   (liked songs, playlists, albums, artists, history), and artist, album and
   playlist pages with back-navigation.
+- **Moods & genres** — the mood and genre categories behind Explore (Chill,
+  Focus, Workout, Sleep, Party, and the genre list) are browsable and open to
+  their playlists. These are built from a renderer no other surface uses, and
+  every category shares one browse id — they are told apart by an opaque
+  `params` the browse request now carries.
+- **Home filter chips** — the mood chips the feed comes with (`Relax`,
+  `Energize`, `Workout`, `Commute`, `Focus`…) re-fetch Home slanted to one.
+  `[` / `]` cycle them, the same keys as the search tabs.
 - **Search** across songs, albums, artists and playlists, with debounced
   suggestions and recallable history.
 - **Playback** — gapless handover, crossfade, seek, 0.5–2× speed with pitch

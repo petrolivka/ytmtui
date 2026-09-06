@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ytm_core::{BrowseId, PlaylistId, Rating, Row, Track, VideoId};
 
+pub use crate::parse::PageFilter;
+
 use crate::{json, parse};
 
 const ORIGIN: &str = "https://music.youtube.com";
@@ -135,6 +137,9 @@ pub struct RowPage {
     pub title: Option<String>,
     pub rows: Vec<Row>,
     pub continuation: Option<String>,
+    /// The page's header chips, when it has them - Home's mood filters. Empty
+    /// for every surface that does not offer them.
+    pub filters: Vec<PageFilter>,
 }
 
 /// How long a cached response stays usable. Caching is not only a speed
@@ -365,6 +370,7 @@ impl Innertube {
                 title: None,
                 rows: parse::page_rows(&v),
                 continuation: parse::continuation(&v),
+                filters: Vec::new(),
             })
         })
     }
@@ -383,8 +389,11 @@ impl Innertube {
     }
 
     /// The account's Home feed: Quick picks, Listen again, mixes.
-    pub fn home(&self) -> Result<RowPage> {
-        self.browse_page("FEmusic_home", TTL_HOME)
+    /// The Home feed. `params` comes from one of the page's own header chips
+    /// (`RowPage::filters`) and re-fetches the feed slanted to that mood;
+    /// `None` is the unfiltered feed.
+    pub fn home(&self, params: Option<&str>) -> Result<RowPage> {
+        self.browse_page("FEmusic_home", params, TTL_HOME)
     }
 
     /// Fetch the next page of a list. Returns the rows and the token for the
@@ -401,6 +410,7 @@ impl Innertube {
                 title: None,
                 rows,
                 continuation: parse::continuation(&v),
+                filters: Vec::new(),
             })
         })
     }
@@ -408,21 +418,37 @@ impl Innertube {
     /// Fetch an arbitrary browse id. Used by the `probe` diagnostic to find
     /// which ids are still live.
     pub fn browse_raw(&self, browse_id: &str) -> Result<Vec<Row>> {
-        Ok(self.browse_page(browse_id, TTL_LIBRARY)?.rows)
+        Ok(self.browse_page(browse_id, None, TTL_LIBRARY)?.rows)
     }
 
     /// A library section, or the play history.
     pub fn library(&self, section: LibrarySection) -> Result<RowPage> {
-        self.browse_page(section.browse_id(), TTL_LIBRARY)
+        self.browse_page(section.browse_id(), None, TTL_LIBRARY)
     }
 
     /// A discovery surface: Explore, New releases, Charts.
     pub fn explore(&self, section: ExploreSection) -> Result<RowPage> {
-        self.browse_page(section.browse_id(), TTL_HOME)
+        self.browse_page(section.browse_id(), None, TTL_HOME)
     }
 
-    fn browse_page(&self, browse_id: &str, ttl: Duration) -> Result<RowPage> {
-        let body = json!({ "browseId": browse_id });
+    /// A mood or genre category, or any other tile reached from Explore.
+    ///
+    /// Every category shares the browse id `FEmusic_moods_and_genres_category`
+    /// and is told apart only by `params`, which is opaque and comes from the
+    /// tile that led here - it is never constructed.
+    pub fn category(&self, id: &BrowseId, params: Option<&str>) -> Result<RowPage> {
+        self.browse_page(&id.0, params, TTL_HOME)
+    }
+
+    /// `params` selects between the several pages a single browse id can
+    /// serve - a mood category, or a mood-filtered Home. It goes into the
+    /// request body, and so into the cache key, which is what keeps each
+    /// variant cached separately.
+    fn browse_page(&self, browse_id: &str, params: Option<&str>, ttl: Duration) -> Result<RowPage> {
+        let body = match params {
+            Some(p) => json!({ "browseId": browse_id, "params": p }),
+            None => json!({ "browseId": browse_id }),
+        };
         self.cached(format!("browse|{body}"), ttl, || {
             let v = self.post("browse", body.clone())?;
             let mut rows = parse::page_rows(&v);
@@ -433,6 +459,7 @@ impl Innertube {
                 title: page_title(&v),
                 rows,
                 continuation: parse::continuation(&v),
+                filters: parse::page_filters(&v),
             })
         })
     }
@@ -470,6 +497,7 @@ impl Innertube {
                 title: page_title(&v),
                 rows: parse::page_rows(&v),
                 continuation: parse::continuation(&v),
+                filters: Vec::new(),
             })
         })
     }
@@ -501,6 +529,7 @@ impl Innertube {
                 title: page_title(&v),
                 rows,
                 continuation: parse::continuation(&v),
+                filters: Vec::new(),
             })
         })
     }
@@ -524,6 +553,7 @@ impl Innertube {
                 title: page_title(&v),
                 rows,
                 continuation: parse::continuation(&v),
+                filters: Vec::new(),
             })
         })
     }

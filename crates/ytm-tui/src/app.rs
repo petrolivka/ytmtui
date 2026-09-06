@@ -273,7 +273,7 @@ impl App {
             rx,
             quit_flag,
         };
-        app.go(View::Home);
+        app.go(View::Home(None));
         app.restore_session();
         for w in loaded.warnings {
             app.toast(w);
@@ -363,13 +363,14 @@ impl App {
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = match &view {
-                View::Home => b.home(),
+                View::Home(chip) => b.home(chip.as_ref().map(|c| c.params.as_str())),
                 View::Explore(s) => b.explore(*s),
                 View::Library(s) => b.library(*s),
                 View::Search { query, filter } => b.search(query, *filter),
                 View::Artist(id, _) => b.artist(id),
                 View::Album(id, _) => b.album(id),
                 View::Playlist(id, _) => b.playlist(id),
+                View::Category(id, params, _) => b.category(id, params.as_deref()),
             };
             let _ = tx.send(AppEvent::Loaded {
                 generation,
@@ -426,6 +427,7 @@ impl App {
             Row::Album(a) => self.push(View::Album(a.id, a.title)),
             Row::Artist(a) => self.push(View::Artist(a.id, a.name)),
             Row::Playlist(p) => self.push(View::Playlist(p.id, p.title)),
+            Row::Category(c) => self.push(View::Category(c.id, c.params, c.title)),
         }
     }
 
@@ -488,6 +490,13 @@ impl App {
                                 p.rows = page.rows;
                                 p.sel = 0;
                                 p.snap_to_selectable();
+                                // A filtered feed comes back with the same
+                                // chips, so keeping the previous set when the
+                                // new response has none avoids the strip
+                                // blinking out mid-cycle.
+                                if !page.filters.is_empty() {
+                                    p.filters = page.filters;
+                                }
                                 if let Some(t) = page.title.filter(|t| !t.trim().is_empty()) {
                                     match &mut p.view {
                                         View::Artist(_, n)
@@ -926,25 +935,79 @@ impl App {
         self.go(View::Search { query: q, filter });
     }
 
+    /// `[` / `]`: the search result tabs, or a feed's header chips.
+    ///
+    /// Both are "the same page, fetched differently", so they share one pair of
+    /// keys rather than each claiming its own.
+    fn cycle_tab(&mut self, forward: bool) {
+        let Some(page) = self.page() else { return };
+        match &page.view {
+            View::Search { .. } => self.cycle_search_tab(forward),
+            _ if !page.filters.is_empty() => self.cycle_page_filter(forward),
+            _ => self.toast("no tabs or filters here".into()),
+        }
+    }
+
     fn cycle_search_tab(&mut self, forward: bool) {
         let Some(page) = self.page() else { return };
         let View::Search { query, filter } = &page.view else {
-            self.toast("tabs apply to search results".into());
             return;
         };
         let all = SearchFilter::ALL;
         let i = all.iter().position(|f| f == filter).unwrap_or(0);
-        let next = if forward {
-            (i + 1) % all.len()
-        } else {
-            (i + all.len() - 1) % all.len()
-        };
+        let next = step(i, all.len(), forward);
         let view = View::Search {
             query: query.clone(),
             filter: all[next],
         };
         self.stack.pop();
         self.push(view);
+    }
+
+    /// Move to the next header chip and re-fetch the page with it.
+    ///
+    /// The chip replaces the current page rather than stacking on it: cycling
+    /// through eleven moods should not leave eleven entries to press Esc
+    /// through to get back where you were.
+    fn cycle_page_filter(&mut self, forward: bool) {
+        let Some(page) = self.page() else { return };
+        let active = self.active_filter_index();
+        let next = step(active, page.filters.len(), forward);
+        let chip = crate::nav::Chip::from_filter(&page.filters[next]);
+        let Some(view) = Self::view_with_filter(&page.view, chip) else {
+            return;
+        };
+        // Carry the chips across so the strip stays put while the new page
+        // loads, instead of vanishing and reappearing.
+        let filters = page.filters.clone();
+        self.stack.pop();
+        self.push(view);
+        if let Some(p) = self.stack.last_mut() {
+            p.filters = filters;
+        }
+    }
+
+    /// Where the applied chip sits in the page's chip list. "All" is index 0,
+    /// and is also the answer when a chip is applied that the current response
+    /// no longer offers.
+    pub fn active_filter_index(&self) -> usize {
+        let Some(page) = self.page() else { return 0 };
+        let View::Home(Some(chip)) = &page.view else {
+            return 0;
+        };
+        page.filters
+            .iter()
+            .position(|f| f.params.as_deref() == Some(chip.params.as_str()))
+            .unwrap_or(0)
+    }
+
+    /// The same view with a different chip applied. `None` for views that do
+    /// not carry one, which is every view except Home today.
+    fn view_with_filter(view: &View, chip: Option<crate::nav::Chip>) -> Option<View> {
+        match view {
+            View::Home(_) => Some(View::Home(chip)),
+            _ => None,
+        }
     }
 
     // ---- input -------------------------------------------------------------
@@ -1495,8 +1558,8 @@ impl App {
                     self.back();
                 }
             }
-            NextTab => self.cycle_search_tab(true),
-            PrevTab => self.cycle_search_tab(false),
+            NextTab => self.cycle_tab(true),
+            PrevTab => self.cycle_tab(false),
             GoToArtist => self.goto_related(true),
             GoToAlbum => self.goto_related(false),
 
@@ -1802,4 +1865,16 @@ fn spawn_analyser(
             }
         })
         .expect("spawn analyser");
+}
+
+/// Step an index around a ring of `len`, forwards or backwards.
+fn step(i: usize, len: usize, forward: bool) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    if forward {
+        (i + 1) % len
+    } else {
+        (i + len - 1) % len
+    }
 }

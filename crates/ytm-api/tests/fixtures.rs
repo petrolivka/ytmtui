@@ -27,10 +27,19 @@ fn counts(rows: &[Row]) -> (usize, usize, usize, usize) {
             Row::Album(_) => c.1 += 1,
             Row::Artist(_) => c.2 += 1,
             Row::Playlist(_) => c.3 += 1,
-            Row::Header(_) => {}
+            Row::Header(_) | Row::Category(_) => {}
         }
     }
     c
+}
+
+fn categories(rows: &[Row]) -> Vec<&ytm_core::CategoryRef> {
+    rows.iter()
+        .filter_map(|r| match r {
+            Row::Category(c) => Some(c),
+            _ => None,
+        })
+        .collect()
 }
 
 #[test]
@@ -136,7 +145,13 @@ fn like_status_lives_in_the_player_overlay() {
 
 #[test]
 fn discovery_surfaces_parse() {
-    for name in ["browse_charts", "browse_new_releases", "browse_explore"] {
+    for name in [
+        "browse_charts",
+        "browse_new_releases",
+        "browse_explore",
+        "browse_home",
+        "browse_moods",
+    ] {
         let rows = parse::page_rows(&load(name));
         assert!(!rows.is_empty(), "{name} parsed to nothing");
     }
@@ -151,4 +166,141 @@ fn tracks_carry_thumbnails() {
         .filter(|t| t.thumbnail.is_some())
         .count();
     assert!(with_art > 0, "no track carried a thumbnail URL");
+}
+
+/// The moods and genres are the bulk of Explore, and they are the one surface
+/// built from `musicNavigationButtonRenderer` rather than from cards. Before
+/// that renderer was handled, this page's 39 tiles parsed to nothing at all
+/// and Explore showed only the carousels underneath them.
+#[test]
+fn explore_yields_its_mood_and_genre_tiles() {
+    let rows = parse::page_rows(&load("browse_explore"));
+    let cats = categories(&rows);
+    assert!(
+        cats.len() >= 30,
+        "expected the mood and genre tiles, got {}",
+        cats.len()
+    );
+
+    for want in ["Chill", "Focus", "Workout"] {
+        assert!(
+            cats.iter().any(|c| c.title == want),
+            "{want} missing from Explore"
+        );
+    }
+
+    // Every mood and genre shares one browse id, so a tile without params is
+    // not a destination - it would silently open the wrong page.
+    for c in cats
+        .iter()
+        .filter(|c| c.id.0 == "FEmusic_moods_and_genres_category")
+    {
+        assert!(
+            c.params.as_deref().is_some_and(|p| !p.is_empty()),
+            "category {:?} carries no params",
+            c.title
+        );
+    }
+
+    // The three tiles at the top of Explore are ordinary destinations, not
+    // categories, and must not be given params they do not have.
+    for (title, id) in [
+        ("New releases", "FEmusic_new_releases"),
+        ("Moods & genres", "FEmusic_moods_and_genres"),
+    ] {
+        let c = cats
+            .iter()
+            .find(|c| c.title == title)
+            .unwrap_or_else(|| panic!("{title} tile missing"));
+        assert_eq!(c.id.0, id);
+    }
+}
+
+/// The dedicated Moods & genres page, which is where the Explore tile leads.
+/// Two grids with their own headers, so the split the official app shows
+/// survives into the row list.
+#[test]
+fn moods_page_splits_moods_from_genres() {
+    let rows = parse::page_rows(&load("browse_moods"));
+    let cats = categories(&rows);
+    assert!(
+        cats.len() >= 30,
+        "expected every mood and genre, got {}",
+        cats.len()
+    );
+    assert!(
+        cats.iter().all(|c| c.params.is_some()),
+        "a category came through without its params"
+    );
+
+    let headers: Vec<&str> = rows
+        .iter()
+        .filter_map(|r| match r {
+            Row::Header(h) => Some(h.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        headers.iter().any(|h| h.contains("Moods")),
+        "no moods header in {headers:?}"
+    );
+    assert!(
+        headers.iter().any(|h| h.contains("Genres")),
+        "no genres header in {headers:?}"
+    );
+}
+
+/// Home's header chips - the mood filters. The response marks none of them
+/// selected and offers no "All", so the unfiltered entry is synthesised; if it
+/// stopped being first, cycling would never get back to the plain feed.
+#[test]
+fn home_carries_its_mood_filter_chips() {
+    let v = load("browse_home");
+    let filters = parse::page_filters(&v);
+    assert!(
+        filters.len() >= 5,
+        "expected Home's mood chips, got {filters:?}"
+    );
+
+    assert_eq!(filters[0].label, "All");
+    assert!(
+        filters[0].params.is_none(),
+        "the All chip must be unfiltered"
+    );
+
+    for want in ["Workout", "Focus", "Relax"] {
+        assert!(
+            filters.iter().any(|f| f.label == want),
+            "{want} chip missing from {filters:?}"
+        );
+    }
+    // A chip with no params would re-fetch the unfiltered feed under a mood's
+    // name, which looks like the filter silently doing nothing.
+    for f in filters.iter().skip(1) {
+        assert!(
+            f.params.as_deref().is_some_and(|p| !p.is_empty()),
+            "chip {:?} carries no params",
+            f.label
+        );
+    }
+
+    // The chips must not have come at the cost of the feed itself.
+    let rows = parse::page_rows(&v);
+    let (tracks, albums, _, playlists) = counts(&rows);
+    assert!(
+        tracks + albums + playlists >= 10,
+        "Home parsed to almost nothing: {tracks} tracks, {albums} albums, {playlists} playlists"
+    );
+}
+
+/// Surfaces that have no chip cloud must report none rather than picking up
+/// something chip-shaped from elsewhere in the response.
+#[test]
+fn pages_without_a_chip_cloud_have_no_filters() {
+    for name in ["browse_moods", "browse_album", "search_songs"] {
+        assert!(
+            parse::page_filters(&load(name)).is_empty(),
+            "{name} produced filters it does not have"
+        );
+    }
 }

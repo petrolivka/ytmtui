@@ -168,7 +168,9 @@ Priority: **M** = must (v1.0), **S** = should, **C** = could (v2), **W** = won't
 | ID | Requirement | Pri |
 |---|---|---|
 | FR-B1 | ✅ **Home** feed: the account's real shelves (Listen again, Quick picks, Mixed for you, recommended albums/playlists), horizontally scrollable carousels | M |
-| FR-B2 | ✅ **Explore**: New releases, Charts (with country selector), Moods & genres | S |
+| FR-B2 | ✅ **Explore**: New releases, Charts, Moods & genres (moods and genre categories, browsable and openable) | S |
+| **FR-B7** | **Header filter chips**: a feed that offers them can be re-fetched slanted to one - Home's `Relax` / `Energize` / `Workout` / `Commute` / `Focus`. Cycled with `[` / `]`, same keys as the search tabs, since both are "the same page fetched differently" | **S** |
+| FR-B8 | Charts **country selector** — the ~65 regions are in the response as `musicMultiSelectMenuItemRenderer` and are not yet parsed | C |
 | FR-B3 | ✅ Entity pages: **Artist** (top songs, albums, singles, related, subscribe), **Album** (tracklist, year, play/shuffle), **Playlist** (tracks, description, owner) | M |
 | FR-B4 | ✅ Infinite scroll / continuation loading with a loading indicator | M |
 | FR-B5 | ✅ "More from this artist / go to album / go to artist" context navigation from any track | M |

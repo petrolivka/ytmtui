@@ -530,6 +530,122 @@ fn row_item(app: &App, r: &Row, playing: bool, width: u16) -> ListItem<'static> 
     ]))
 }
 
+/// The text of one chip.
+///
+/// Brackets rather than a wider highlight so every chip keeps the same width
+/// whichever is active - otherwise cycling through them reflows the strip
+/// under the cursor.
+fn chip_text(label: &str, active: bool) -> String {
+    if active {
+        format!("[{label}]")
+    } else {
+        format!(" {label} ")
+    }
+}
+
+/// Wrap chips across `width` into at most `max_lines` rows, starting at
+/// `start`. Returns the chip index for each row, and whether it ran out of
+/// room before the last chip.
+fn wrap_chips(
+    texts: &[String],
+    start: usize,
+    width: usize,
+    max_lines: usize,
+) -> (Vec<Vec<usize>>, bool) {
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    let mut row: Vec<usize> = Vec::new();
+    let mut used = 0usize;
+    for (i, t) in texts.iter().enumerate().skip(start) {
+        let w = t.width();
+        // A chip wider than the pane still goes on a row of its own rather
+        // than looping forever looking for one that fits.
+        if used + w > width && !row.is_empty() {
+            if rows.len() + 1 >= max_lines {
+                rows.push(row);
+                return (rows, true);
+            }
+            rows.push(std::mem::take(&mut row));
+            used = 0;
+        }
+        used += w;
+        row.push(i);
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    (rows, false)
+}
+
+/// Where the strip has to start for the applied chip to be on screen.
+///
+/// A narrow pane cannot show twelve moods at once, and the one chip that must
+/// never be the one cut off is the one currently applied - otherwise the strip
+/// says nothing about what you are looking at.
+fn chip_scroll(texts: &[String], active: usize, width: usize, max_lines: usize) -> usize {
+    for start in 0..=active {
+        let (rows, _) = wrap_chips(texts, start, width, max_lines);
+        if rows.iter().flatten().any(|i| *i == active) {
+            return start;
+        }
+    }
+    active
+}
+
+/// Lay the header chips out across the pane, with the applied one bracketed
+/// and, where the pane is too narrow for all of them, in view.
+fn chip_lines(
+    app: &App,
+    filters: &[ytm_api::PageFilter],
+    active: usize,
+    width: u16,
+    max_lines: usize,
+) -> Vec<Line<'static>> {
+    let texts: Vec<String> = filters
+        .iter()
+        .enumerate()
+        .map(|(i, f)| chip_text(&f.label, i == active))
+        .collect();
+    let width = width as usize;
+    let start = chip_scroll(&texts, active, width, max_lines);
+    let (rows, more) = wrap_chips(&texts, start, width, max_lines);
+
+    let ell = |s: &mut Vec<Span<'static>>| {
+        s.push(Span::styled("\u{2026}", Style::default().fg(app.theme.dim)))
+    };
+    let mut lines = Vec::with_capacity(rows.len());
+    for (n, row) in rows.iter().enumerate() {
+        let mut spans: Vec<Span> = Vec::with_capacity(row.len() + 2);
+        if n == 0 && start > 0 {
+            ell(&mut spans);
+        }
+        for i in row {
+            spans.push(Span::styled(
+                texts[*i].clone(),
+                if *i == active {
+                    Style::default()
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(app.theme.dim)
+                },
+            ));
+        }
+        if more && n + 1 == rows.len() {
+            ell(&mut spans);
+        }
+        lines.push(Line::from(spans));
+    }
+    lines
+}
+
+/// The header chip currently applied, if any.
+fn active_chip(page: &crate::nav::Page) -> Option<&str> {
+    match &page.view {
+        crate::nav::View::Home(Some(c)) => Some(c.label.as_str()),
+        _ => None,
+    }
+}
+
 fn draw_content(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect) {
     let focused = app.focus == Focus::Content;
     let Some(page) = app.page() else {
@@ -561,13 +677,36 @@ fn draw_content(f: &mut Frame, app: &App, status: &PlayerStatus, area: Rect) {
     }
 
     let b = block(app, title, focused);
-    let inner = b.inner(area);
+    let mut inner = b.inner(area);
     f.render_widget(b, area);
+
+    // Home's mood chips sit above the shelves rather than in the block title:
+    // eleven of them do not fit on a title line, and they scroll away with the
+    // content rather than costing a permanent row (FR-U2).
+    if !page.filters.is_empty() && inner.height > 2 {
+        let lines = chip_lines(
+            app,
+            &page.filters,
+            app.active_filter_index(),
+            inner.width,
+            (inner.height as usize / 3).clamp(1, 3),
+        );
+        let [strip, rest] =
+            Layout::vertical([Constraint::Length(lines.len() as u16), Constraint::Min(1)])
+                .areas(inner);
+        f.render_widget(Paragraph::new(lines), strip);
+        inner = rest;
+    }
 
     app.hit.content.set(inner);
     if page.rows.is_empty() {
         let msg = if page.loading {
             "loading\u{2026}".to_string()
+        } else if let Some(chip) = active_chip(page) {
+            // Not every chip leads somewhere this client can render - the
+            // Podcasts one is a different content type entirely. Naming the
+            // filter says which, rather than leaving the feed looking broken.
+            format!("nothing here for \u{201c}{chip}\u{201d}  \u{2014}  [ ] to change filter")
         } else {
             page.error.clone().unwrap_or_else(|| "nothing here".into())
         };
@@ -1082,6 +1221,98 @@ mod tests {
         // Not at the expense of a terminal that has no room to give.
         let cramped = spectrum_height(16, false, VizStyle::Chroma);
         assert!(cramped <= 8, "a 16-row terminal gave the strip {cramped}");
+    }
+
+    fn chips() -> Vec<String> {
+        [
+            "All",
+            "Podcasts",
+            "Focus",
+            "Workout",
+            "Relax",
+            "Feel good",
+            "Party",
+            "Energize",
+            "Commute",
+            "Romance",
+            "Sad",
+            "Sleep",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(i, l)| chip_text(l, i == 0))
+        .collect()
+    }
+
+    /// A chip strip that runs past the pane must never be the reason you
+    /// cannot see which filter is applied.
+    #[test]
+    fn the_applied_chip_is_always_on_screen() {
+        let all = chips();
+        for width in [20usize, 30, 44, 60, 80, 110, 200] {
+            for max_lines in [1usize, 2, 3] {
+                for active in 0..all.len() {
+                    let texts: Vec<String> = all
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| chip_text(&format!("c{i}"), i == active))
+                        .collect();
+                    let start = chip_scroll(&texts, active, width, max_lines);
+                    let (rows, _) = wrap_chips(&texts, start, width, max_lines);
+                    assert!(
+                        rows.iter().flatten().any(|i| *i == active),
+                        "w={width} lines={max_lines} active={active}: chip is off screen"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The strip has to stay inside the pane and inside its line budget, or it
+    /// eats rows the list needs.
+    #[test]
+    fn the_chip_strip_stays_within_its_budget() {
+        let all = chips();
+        for width in [20usize, 30, 44, 60, 80, 110, 200] {
+            for max_lines in [1usize, 2, 3] {
+                let (rows, _) = wrap_chips(&all, 0, width, max_lines);
+                assert!(
+                    rows.len() <= max_lines,
+                    "w={width}: {} rows for a budget of {max_lines}",
+                    rows.len()
+                );
+                for row in &rows {
+                    let used: usize = row.iter().map(|i| all[*i].width()).sum();
+                    // A single chip wider than the pane is clipped by the
+                    // renderer; anything else must fit.
+                    assert!(
+                        used <= width || row.len() == 1,
+                        "w={width}: a row of {} chips came to {used}",
+                        row.len()
+                    );
+                }
+            }
+        }
+    }
+
+    /// Given room, every chip shows, in order, with nothing dropped.
+    #[test]
+    fn a_wide_pane_shows_every_chip_in_order() {
+        let all = chips();
+        let (rows, more) = wrap_chips(&all, 0, 400, 3);
+        assert!(!more, "chips were dropped from a pane with room to spare");
+        let shown: Vec<usize> = rows.into_iter().flatten().collect();
+        assert_eq!(shown, (0..all.len()).collect::<Vec<_>>());
+    }
+
+    /// Selecting a chip must not reflow the strip, or the labels slide around
+    /// under the cursor as you cycle.
+    #[test]
+    fn selection_does_not_change_a_chips_width() {
+        assert_eq!(
+            chip_text("Workout", true).width(),
+            chip_text("Workout", false).width()
+        );
     }
 
     /// A band too short, or too narrow once the spectrum has its share, is
