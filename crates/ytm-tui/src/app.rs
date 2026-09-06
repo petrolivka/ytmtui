@@ -167,7 +167,8 @@ pub struct App {
     /// The current pixel frame as half-block cells, for terminals without a
     /// graphics protocol. Empty when the graphics path is drawing it instead.
     pub pixel_cells: Vec<Vec<ytm_art::Cell>>,
-    /// Fades after an onset, so the accent pulses rather than flickers.
+    /// Fades after an onset, so the accent pulses rather than flickers. Feeds
+    /// the pixel visualisers only - nothing in the chrome reacts to onsets.
     pub beat_glow: f32,
     last_seq: u64,
     /// When the last pixel frame was rendered. The ink advects by time rather

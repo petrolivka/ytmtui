@@ -729,9 +729,7 @@ fn draw_cover(f: &mut Frame, app: &App, area: Rect) {
 
 fn draw_spectrum(f: &mut Frame, app: &App, area: Rect) {
     let frame = app.spectrum.load_full();
-    // The border brightens on an onset: an accent that follows the music
-    // without adding another moving element to read.
-    let mut b = block(
+    let b = block(
         app,
         format!(
             "spectrum \u{2022} {} \u{2022} {} bands",
@@ -740,9 +738,6 @@ fn draw_spectrum(f: &mut Frame, app: &App, area: Rect) {
         ),
         false,
     );
-    if app.beat_glow > 0.01 {
-        b = b.border_style(Style::default().fg(app.theme.grad(app.beat_glow)));
-    }
     let inner = b.inner(area);
     f.render_widget(b, area);
     app.hit.viz.set(inner);
